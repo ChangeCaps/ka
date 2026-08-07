@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    diagnostic::{Diagnostic, Emitter, File, Span},
+    diagnostic::{Diagnostic, Emitter, FileId, Span},
     intern::Interner,
     lex::Token,
 };
@@ -9,7 +9,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct Tokens {
     tokens: Arc<[(Token, Span)]>,
-    file: File,
+    file: FileId,
     eof: u32,
 }
 
@@ -17,13 +17,13 @@ impl Tokens {
     pub fn lex(
         emitter: &mut dyn Emitter,
         interner: &mut Interner,
-        file: File,
+        file: FileId,
         input: &str,
     ) -> Self {
         let mut lexer = Lexer::new(emitter, interner, file, input);
 
         // lex the initial indent
-        lexer.advance_indents();
+        lexer.advance_newlines();
 
         // advance the lexer to the end of input
         while lexer.advance() {}
@@ -60,7 +60,7 @@ struct Lexer<'a> {
     emitter: &'a mut dyn Emitter,
     interner: &'a mut Interner,
 
-    file: File,
+    file: FileId,
     input: &'a str,
 
     indents: Vec<&'a str>,
@@ -73,7 +73,7 @@ impl<'a> Lexer<'a> {
     fn new(
         emitter: &'a mut dyn Emitter,
         interner: &'a mut Interner,
-        file: File,
+        file: FileId,
         input: &'a str,
     ) -> Self {
         Self {
@@ -160,15 +160,18 @@ impl<'a> Lexer<'a> {
         };
 
         self.tokens.push((token, span));
+        self.advance_newlines();
 
+        true
+    }
+
+    fn advance_newlines(&mut self) {
         while self.peek().is_some_and(Self::is_newline) {
             let (_, span) = self.spanned(|l| l.consume());
             self.tokens.push((Token::Newline, span));
 
             self.advance_indents();
         }
-
-        true
     }
 
     fn advance_invalid(&mut self, c: char) {
@@ -242,6 +245,11 @@ impl<'a> Lexer<'a> {
             return Some(token);
         }
 
+        if Self::is_string_delimiter(c) {
+            let token = self.consume_string();
+            return Some(token);
+        }
+
         if let Some(token) = self.try_consume_symbol(c) {
             return Some(token);
         }
@@ -275,6 +283,26 @@ impl<'a> Lexer<'a> {
         Token::Number(number)
     }
 
+    fn consume_string(&mut self) -> Token {
+        self.consume();
+
+        let string = self.consume_while(|c| !Self::is_string_delimiter(c));
+
+        let string = string
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace("\\0", "\0")
+            .replace("\\\\", "\\")
+            .replace("\\\"", "\"");
+
+        let string = self.interner.intern(string);
+
+        self.consume();
+
+        Token::String(string)
+    }
+
     fn try_consume_symbol(&mut self, c: char) -> Option<Token> {
         if let Some(snd) = self.peek_nth(1)
             && let Some(token) = Self::match_two_character_symbol(c, snd)
@@ -291,11 +319,19 @@ impl<'a> Lexer<'a> {
 
     fn match_keyword(s: &str) -> Option<Token> {
         Some(match s {
+            "as" => Token::As,
+            "do" => Token::Do,
+            "extern" => Token::Extern,
+            "import" => Token::Import,
+            "int" => Token::Int,
             "is" => Token::Is,
             "let" => Token::Let,
             "match" => Token::Match,
+            "nat" => Token::Nat,
             "num" => Token::Num,
+            "str" => Token::Str,
             "type" => Token::Type,
+            "_" => Token::Under,
             _ => return None,
         })
     }
@@ -307,6 +343,12 @@ impl<'a> Lexer<'a> {
             ';' => Token::Semi,
             '.' => Token::Dot,
             ',' => Token::Comma,
+            '+' => Token::Plus,
+            '-' => Token::Minus,
+            '*' => Token::Star,
+            '/' => Token::Slash,
+            '>' => Token::Gt,
+            '<' => Token::Lt,
             '|' => Token::Pipe,
             '!' => Token::Bang,
 
@@ -326,7 +368,14 @@ impl<'a> Lexer<'a> {
 
     fn match_two_character_symbol(fst: char, snd: char) -> Option<Token> {
         Some(match (fst, snd) {
-            ('-', '>') => Token::Arrow,
+            (':', ':') => Token::ColonColon,
+            ('-', '>') => Token::RightArrow,
+            ('<', '-') => Token::LeftArrow,
+            ('|', '>') => Token::PipeGt,
+            ('=', '=') => Token::EqEq,
+            ('!', '=') => Token::BangEq,
+            ('>', '=') => Token::GtEq,
+            ('<', '=') => Token::LtEq,
             _ => return None,
         })
     }
@@ -349,6 +398,10 @@ impl<'a> Lexer<'a> {
 
     fn is_ident_continue(c: char) -> bool {
         c.is_alphanumeric() || c == '_' || c == '-' || c == '\''
+    }
+
+    fn is_string_delimiter(c: char) -> bool {
+        c == '"'
     }
 
     fn is_number_start(c: char) -> bool {

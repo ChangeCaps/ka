@@ -7,9 +7,13 @@ use crate::{
 pub enum Expr {
     Paren(ParenExpr),
     Num(NumExpr),
+    String(StringExpr),
     Named(NamedExpr),
     Call(CallExpr),
-    Tag(TagExpr),
+    Lambda(LambdaExpr),
+    Variant(VariantExpr),
+    Record(RecordExpr),
+    Binary(BinaryExpr),
     Tuple(TupleExpr),
     Block(BlockExpr),
     Do(DoExpr),
@@ -20,6 +24,7 @@ pub enum Expr {
 #[derive(Clone, Debug)]
 pub struct ParenExpr {
     pub expr: Box<Expr>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -29,7 +34,14 @@ pub struct NumExpr {
 }
 
 #[derive(Clone, Debug)]
+pub struct StringExpr {
+    pub string: &'static str,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub struct NamedExpr {
+    pub import: Option<&'static str>,
     pub name: &'static str,
     pub span: Span,
 }
@@ -38,32 +50,85 @@ pub struct NamedExpr {
 pub struct CallExpr {
     pub lambda: Box<Expr>,
     pub input: Box<Expr>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct TagExpr {
+pub struct LambdaExpr {
+    pub params: Vec<Pat>,
+    pub expr: Box<Expr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct VariantExpr {
     pub name: Option<&'static str>,
     pub expr: Option<Box<Expr>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct RecordExpr {
+    pub fields: Vec<ExprField>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExprField {
+    pub name: Option<&'static str>,
+    pub expr: Expr,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct TupleExpr {
     pub fields: Vec<Expr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct BinaryExpr {
+    pub op: BinOp,
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Gt,
+    Lt,
+    GtEq,
+    LtEq,
+    Eq,
+    Ne,
 }
 
 #[derive(Clone, Debug)]
 pub struct BlockExpr {
     pub defs: Vec<Def>,
     pub expr: Box<Expr>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct DoExpr {
-    pub stmts: Vec<Stmt>,
+    pub kind: DoKind,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub enum Stmt {
+pub enum DoKind {
+    Block(Vec<DoStmt>),
+    Expr(Box<Expr>),
+}
+
+#[derive(Clone, Debug)]
+pub enum DoStmt {
     Def(Def),
     Expr(Expr),
 }
@@ -72,10 +137,32 @@ pub enum Stmt {
 pub struct MatchExpr {
     pub expr: Box<Expr>,
     pub arms: Vec<Arm>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct Arm {
     pub pat: Pat,
     pub expr: Expr,
+}
+
+impl Expr {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Paren(expr) => expr.span,
+            Self::Num(expr) => expr.span,
+            Self::String(expr) => expr.span,
+            Self::Named(expr) => expr.span,
+            Self::Call(expr) => expr.span,
+            Self::Lambda(expr) => expr.span,
+            Self::Variant(expr) => expr.span,
+            Self::Record(expr) => expr.span,
+            Self::Binary(expr) => expr.span,
+            Self::Tuple(expr) => expr.span,
+            Self::Block(expr) => expr.span,
+            Self::Do(expr) => expr.span,
+            Self::Match(expr) => expr.span,
+            Self::Error(span) => *span,
+        }
+    }
 }

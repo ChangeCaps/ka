@@ -1,5 +1,8 @@
 use crate::{
-    ast::{GenericTy, LambdaTy, MonadTy, NamedTy, ParenTy, TupleTy, Ty, UnionTy, Variant},
+    ast::{
+        AliasTy, GenericTy, LambdaTy, MonadTy, ParenTy, RecordTy, TupleTy, Ty, TyField, UnionTy,
+        Variant,
+    },
     lex::Token,
     parse::Parser,
 };
@@ -8,7 +11,10 @@ pub fn is_ty(token: Token) -> bool {
     matches!(
         token,
         Token::Ident(..)
+            | Token::Nat
+            | Token::Int
             | Token::Num
+            | Token::Str
             | Token::Quote
             | Token::Colon
             | Token::Bang
@@ -39,7 +45,7 @@ fn tuple(parser: &mut Parser) -> Ty {
 fn lambda(parser: &mut Parser) -> Ty {
     let input = union(parser);
 
-    if !parser.take(Token::Arrow) {
+    if !parser.take(Token::RightArrow) {
         return input;
     }
 
@@ -53,7 +59,7 @@ fn lambda(parser: &mut Parser) -> Ty {
 
 fn union(parser: &mut Parser) -> Ty {
     if !parser.is(Token::Colon) {
-        return named(parser);
+        return alias(parser);
     }
 
     let variants = variants(parser);
@@ -76,26 +82,45 @@ fn variants(parser: &mut Parser) -> Vec<Variant> {
 }
 
 fn variant(parser: &mut Parser) -> Variant {
-    parser.expect(Token::Colon);
+    let start = parser.expect(Token::Colon);
+    let span = start.join(parser.span());
 
     let name = parser.expect_ident();
     let ty = is_ty(parser.peek()).then(|| union(parser));
 
-    Variant { name, ty }
+    Variant { name, ty, span }
 }
 
-fn named(parser: &mut Parser) -> Ty {
-    let Token::Ident(name) = parser.peek() else {
+fn alias(parser: &mut Parser) -> Ty {
+    let Token::Ident(mut name) = parser.peek() else {
         return term(parser);
     };
 
-    parser.consume();
-    let args = named_args(parser);
+    let mut import = None;
+    let span = parser.consume();
 
-    Ty::Named(NamedTy { name, args })
+    if parser.take(Token::ColonColon) {
+        import = Some(name);
+
+        let span = span.join(parser.span());
+        let Some(actual_name) = parser.expect_ident() else {
+            return Ty::Error(span);
+        };
+
+        name = actual_name;
+    }
+
+    let args = alias_args(parser);
+
+    Ty::Alias(AliasTy {
+        import,
+        name,
+        args,
+        span,
+    })
 }
 
-fn named_args(parser: &mut Parser) -> Vec<Ty> {
+fn alias_args(parser: &mut Parser) -> Vec<Ty> {
     let mut args = Vec::new();
 
     while is_ty(parser.peek()) {
@@ -107,11 +132,16 @@ fn named_args(parser: &mut Parser) -> Vec<Ty> {
 
 fn term(parser: &mut Parser) -> Ty {
     match parser.peek() {
+        Token::Nat => nat(parser),
+        Token::Int => int(parser),
         Token::Num => num(parser),
+        Token::Str => str(parser),
+
         Token::Quote => generic(parser),
         Token::Bang => monad(parser),
 
         Token::OpenParen => paren(parser),
+        Token::OpenBrace => record(parser),
 
         _ => {
             let span = parser.expected("type");
@@ -131,10 +161,24 @@ fn paren(parser: &mut Parser) -> Ty {
     Ty::Paren(ParenTy { ty })
 }
 
+fn nat(parser: &mut Parser) -> Ty {
+    parser.expect(Token::Nat);
+    Ty::Nat
+}
+
+fn int(parser: &mut Parser) -> Ty {
+    parser.expect(Token::Int);
+    Ty::Int
+}
+
 fn num(parser: &mut Parser) -> Ty {
     parser.expect(Token::Num);
-
     Ty::Num
+}
+
+fn str(parser: &mut Parser) -> Ty {
+    parser.expect(Token::Str);
+    Ty::Str
 }
 
 fn generic(parser: &mut Parser) -> Ty {
@@ -142,7 +186,7 @@ fn generic(parser: &mut Parser) -> Ty {
 
     let span = parser.span();
     match parser.expect_ident() {
-        Some(name) => Ty::Generic(GenericTy { name }),
+        Some(name) => Ty::Generic(GenericTy { name, span }),
         None => Ty::Error(span),
     }
 }
@@ -154,4 +198,49 @@ fn monad(parser: &mut Parser) -> Ty {
     let ty = Box::new(ty);
 
     Ty::Monad(MonadTy { ty })
+}
+
+fn record(parser: &mut Parser) -> Ty {
+    parser.expect(Token::OpenBrace);
+
+    let mut fields = Vec::new();
+
+    if parser.is(Token::Newline) {
+        parser.take_all(Token::Newline);
+        parser.expect(Token::Indent);
+        parser.take_all(Token::Newline);
+
+        while !parser.is(Token::Dedent) && !parser.is(Token::Eof) {
+            let field = field(parser);
+            fields.push(field);
+
+            parser.take_all(Token::Newline);
+        }
+
+        parser.expect(Token::Dedent);
+    } else {
+        while !parser.is(Token::CloseBrace) && !parser.is(Token::Eof) {
+            let field = field(parser);
+            fields.push(field);
+
+            if !parser.take(Token::Semi) {
+                break;
+            }
+        }
+    }
+
+    parser.expect(Token::CloseBrace);
+
+    Ty::Record(RecordTy { fields })
+}
+
+fn field(parser: &mut Parser) -> TyField {
+    let span = parser.span();
+    let name = parser.expect_ident();
+
+    parser.expect(Token::Colon);
+
+    let ty = ty(parser);
+
+    TyField { name, ty, span }
 }

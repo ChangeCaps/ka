@@ -5,23 +5,42 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub enum Def {
-    Type(TypeDef),
+    Import(ImportDef),
+    Extern(ExternDef),
+    Alias(AliasDef),
     Let(LetDef),
     Error(Span),
 }
 
 #[derive(Clone, Debug)]
-pub struct TypeDef {
+pub struct ImportDef {
+    pub path: &'static str,
     pub name: Option<&'static str>,
-    pub args: Vec<Option<&'static str>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExternDef {
+    pub id: &'static str,
+    pub name: &'static str,
     pub ty: Ty,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct AliasDef {
+    pub name: &'static str,
+    pub params: Vec<Option<&'static str>>,
+    pub ty: Ty,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct LetDef {
     pub ty: Option<Ty>,
     pub pat: Pat,
-    pub args: Vec<Pat>,
+    pub params: Vec<Pat>,
+    pub is_bind: bool,
     pub expr: Expr,
     pub span: Span,
 }

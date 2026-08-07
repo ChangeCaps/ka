@@ -3,6 +3,7 @@ use crate::diagnostic::Span;
 #[derive(Clone, Debug)]
 pub enum Pat {
     Paren(ParenPat),
+    Wild(WildPat),
     Bind(BindPat),
     Tuple(TuplePat),
     Tag(TagPat),
@@ -12,6 +13,12 @@ pub enum Pat {
 #[derive(Clone, Debug)]
 pub struct ParenPat {
     pub pat: Box<Pat>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct WildPat {
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -22,11 +29,26 @@ pub struct BindPat {
 
 #[derive(Clone, Debug)]
 pub struct TuplePat {
-    pub pats: Vec<Pat>,
+    pub fields: Vec<Pat>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct TagPat {
     pub name: Option<&'static str>,
     pub pat: Option<Box<Pat>>,
+    pub span: Span,
+}
+
+impl Pat {
+    pub fn span(&self) -> Span {
+        match self {
+            Pat::Paren(pat) => pat.span,
+            Pat::Wild(pat) => pat.span,
+            Pat::Bind(pat) => pat.span,
+            Pat::Tuple(pat) => pat.span,
+            Pat::Tag(pat) => pat.span,
+            Pat::Error(span) => *span,
+        }
+    }
 }

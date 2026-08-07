@@ -1,0 +1,10 @@
+import "std:list.ka"
+
+extern "builtin::string::format" format is 'a -> str
+
+extern "builtin::string::prepend" prepend is str -> str -> str
+
+extern "builtin::string::split" split is str -> str -> list str
+
+is str -> str -> str
+let append a b = prepend b a

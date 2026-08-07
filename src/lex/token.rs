@@ -3,6 +3,7 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Token {
     Ident(&'static str),
+    String(&'static str),
     Number(f64),
 
     // special
@@ -14,10 +15,17 @@ pub enum Token {
     Eof,
 
     // keywords
+    As,
+    Do,
+    Extern,
+    Import,
+    Int,
     Is,
     Let,
     Match,
+    Nat,
     Num,
+    Str,
     Type,
 
     // one-character symbols
@@ -26,8 +34,15 @@ pub enum Token {
     Semi,
     Dot,
     Comma,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Gt,
+    Lt,
     Pipe,
     Bang,
+    Under,
     Back,
     Quote,
 
@@ -39,13 +54,21 @@ pub enum Token {
     CloseBracket,
 
     // two-character symbols
-    Arrow,
+    ColonColon,
+    RightArrow,
+    LeftArrow,
+    PipeGt,
+    EqEq,
+    BangEq,
+    GtEq,
+    LtEq,
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ident(ident) => write!(f, "{ident}"),
+            Self::String(string) => write!(f, "\"{string}\""),
             Self::Number(number) => write!(f, "{number}"),
 
             // special
@@ -57,10 +80,17 @@ impl fmt::Display for Token {
             Self::Eof => write!(f, "end of file"),
 
             // keywords
+            Self::As => write!(f, "as"),
+            Self::Do => write!(f, "do"),
+            Self::Extern => write!(f, "extern"),
+            Self::Import => write!(f, "import"),
+            Self::Int => write!(f, "int"),
             Self::Is => write!(f, "is"),
             Self::Let => write!(f, "let"),
             Self::Match => write!(f, "match"),
+            Self::Nat => write!(f, "nat"),
             Self::Num => write!(f, "num"),
+            Self::Str => write!(f, "str"),
             Self::Type => write!(f, "type"),
 
             // one-character symbols
@@ -69,8 +99,15 @@ impl fmt::Display for Token {
             Self::Semi => write!(f, ";"),
             Self::Dot => write!(f, "."),
             Self::Comma => write!(f, ","),
+            Self::Plus => write!(f, "+"),
+            Self::Minus => write!(f, "-"),
+            Self::Star => write!(f, "*"),
+            Self::Slash => write!(f, "/"),
+            Self::Gt => write!(f, ">"),
+            Self::Lt => write!(f, "<"),
             Self::Pipe => write!(f, "|"),
             Self::Bang => write!(f, "!"),
+            Self::Under => write!(f, "_"),
             Self::Back => write!(f, "\\"),
             Self::Quote => write!(f, "'"),
             Self::OpenParen => write!(f, "("),
@@ -81,7 +118,14 @@ impl fmt::Display for Token {
             Self::CloseBracket => write!(f, "]"),
 
             // two-character symbols
-            Self::Arrow => write!(f, "->"),
+            Self::ColonColon => write!(f, "::"),
+            Self::RightArrow => write!(f, "->"),
+            Self::LeftArrow => write!(f, "<-"),
+            Self::PipeGt => write!(f, "|>"),
+            Self::EqEq => write!(f, "=="),
+            Self::BangEq => write!(f, "!="),
+            Self::GtEq => write!(f, ">="),
+            Self::LtEq => write!(f, "<="),
         }
     }
 }

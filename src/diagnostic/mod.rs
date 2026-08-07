@@ -1,10 +1,14 @@
 mod emitter;
+mod files;
 mod span;
+mod writer;
 
 use std::fmt;
 
 pub use emitter::*;
+pub use files::*;
 pub use span::*;
+pub use writer::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
@@ -49,6 +53,18 @@ impl Diagnostic {
 
     pub fn with_span(self, span: Span) -> Self {
         self.with_label(span, String::new())
+    }
+
+    pub fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn labels(&self) -> &[Label] {
+        &self.labels
     }
 }
 

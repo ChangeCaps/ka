@@ -1,19 +1,19 @@
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct File {
+pub struct FileId {
     pub index: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
-    pub file: File,
+    pub file: FileId,
     pub start: u32,
     pub end: u32,
 }
 
 impl Span {
-    pub const fn new(file: File, start: u32, end: u32) -> Self {
+    pub const fn new(file: FileId, start: u32, end: u32) -> Self {
         Self { file, start, end }
     }
 

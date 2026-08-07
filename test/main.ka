@@ -1,0 +1,8 @@
+import "std:io.ka"
+import "std:string.ka"
+
+let main =
+    "a,b,c"
+        |> split ","
+        |> format
+        |> println

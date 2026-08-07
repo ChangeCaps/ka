@@ -1,11 +1,15 @@
 use crate::{
-    ast::{BindPat, ParenPat, Pat, TagPat, TuplePat},
+    ast::{BindPat, ParenPat, Pat, TagPat, TuplePat, WildPat},
+    diagnostic::Span,
     lex::Token,
     parse::Parser,
 };
 
 pub fn is_pat(token: Token) -> bool {
-    matches!(token, Token::Ident(..) | Token::Colon | Token::OpenParen)
+    matches!(
+        token,
+        Token::Ident(..) | Token::Colon | Token::Under | Token::OpenParen
+    )
 }
 
 pub fn pat(parser: &mut Parser) -> Pat {
@@ -19,18 +23,21 @@ fn tuple(parser: &mut Parser) -> Pat {
         return first;
     }
 
-    let mut pats = vec![first];
+    let mut fields = vec![first];
 
     while parser.take(Token::Comma) {
-        pats.push(term(parser));
+        fields.push(term(parser));
     }
 
-    Pat::Tuple(TuplePat { pats })
+    let span = fields.iter().map(Pat::span).reduce(Span::join).unwrap();
+
+    Pat::Tuple(TuplePat { fields, span })
 }
 
 fn term(parser: &mut Parser) -> Pat {
     match parser.peek() {
         Token::Ident(name) => bind(parser, name),
+        Token::Under => wild(parser),
         Token::Colon => tag(parser),
 
         Token::OpenParen => paren(parser),
@@ -43,14 +50,21 @@ fn term(parser: &mut Parser) -> Pat {
 }
 
 fn paren(parser: &mut Parser) -> Pat {
-    parser.expect(Token::OpenParen);
+    let start = parser.expect(Token::OpenParen);
 
     let pat = pat(parser);
     let pat = Box::new(pat);
 
-    parser.expect(Token::CloseParen);
+    let end = parser.expect(Token::CloseParen);
+    let span = start.join(end);
 
-    Pat::Paren(ParenPat { pat })
+    Pat::Paren(ParenPat { pat, span })
+}
+
+fn wild(parser: &mut Parser) -> Pat {
+    let span = parser.expect(Token::Under);
+
+    Pat::Wild(WildPat { span })
 }
 
 fn bind(parser: &mut Parser, name: &'static str) -> Pat {
@@ -60,10 +74,15 @@ fn bind(parser: &mut Parser, name: &'static str) -> Pat {
 }
 
 fn tag(parser: &mut Parser) -> Pat {
-    parser.expect(Token::Colon);
+    let start = parser.expect(Token::Colon);
+    let mut span = start.join(parser.span());
 
     let name = parser.expect_ident();
     let pat = is_pat(parser.peek()).then(|| Box::new(term(parser)));
 
-    Pat::Tag(TagPat { name, pat })
+    if let Some(ref pat) = pat {
+        span = span.join(pat.span());
+    }
+
+    Pat::Tag(TagPat { name, pat, span })
 }

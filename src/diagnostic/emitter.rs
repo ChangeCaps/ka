@@ -12,3 +12,9 @@ impl Emitter for DebugEmitter {
         eprintln!("{:?}", diagnostic);
     }
 }
+
+impl Emitter for Vec<Diagnostic> {
+    fn emit(&mut self, diagnostic: Diagnostic) {
+        self.push(diagnostic);
+    }
+}

@@ -47,7 +47,11 @@ impl<'a> Parser<'a> {
     }
 
     pub fn is(&self, token: Token) -> bool {
-        self.peek() == token
+        self.is_nth(0, token)
+    }
+
+    pub fn is_nth(&self, n: usize, token: Token) -> bool {
+        self.peek_nth(n) == token
     }
 
     pub fn span_nth(&self, n: usize) -> Span {
@@ -105,6 +109,20 @@ impl<'a> Parser<'a> {
 
             _ => {
                 self.expected("identifier");
+                None
+            }
+        }
+    }
+
+    pub fn expect_string(&mut self) -> Option<&'static str> {
+        match self.peek() {
+            Token::String(ident) => {
+                self.consume();
+                Some(ident)
+            }
+
+            _ => {
+                self.expected("string literal");
                 None
             }
         }

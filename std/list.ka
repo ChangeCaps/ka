@@ -1,0 +1,35 @@
+type list 'a = :none | :some ('a, list 'a)
+type bool = :true | :false
+
+is list 'a
+let empty = :none
+
+is 'a -> list 'a -> list 'a
+let prepend x xs = :some (x, xs)
+
+is ('a -> 'b) -> list 'a -> list 'b
+let map f xs =
+  match xs
+    :none -> empty
+    :some (x, xs) ->
+      let x = f x
+      let xs = map f xs
+      prepend x xs
+
+is ('a -> bool) -> list 'a -> list 'a
+let filter f xs =
+  match xs
+    :none -> empty
+    :some (x, xs) ->
+      let xs = filter f xs
+      match f x
+        :false -> xs
+        :true -> prepend x xs
+
+is 'acc -> ('acc -> 'a -> 'acc) -> list 'a -> 'acc
+let fold acc f xs =
+  match xs
+    :none -> acc
+    :some (x, xs) ->
+      let acc = f acc x
+      fold acc f xs
