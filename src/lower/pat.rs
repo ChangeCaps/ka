@@ -101,7 +101,7 @@ impl Lowerer<'_> {
             variants: vec![ir::Variant { name, ty }],
         });
 
-        ir::Pat::Tag(ir::TagPat {
+        ir::Pat::Variant(ir::VariantPat {
             name,
             pat,
             ty,

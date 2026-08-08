@@ -1,8 +1,7 @@
+import "std:list.ka"
 import "std:io.ka"
-import "std:string.ka"
 
+is !{}
 let main =
-    "a,b,c"
-        |> split ","
-        |> format
-        |> println
+  empty
+    |> debug

@@ -7,12 +7,12 @@ use owo_colors::{AnsiColors, OwoColorize};
 
 use crate::diagnostic::{Diagnostic, Files, Label, Severity};
 
-pub struct DiagnosticWriter<'a, W> {
+pub struct Writer<'a, W> {
     writer: W,
     files: &'a Files,
 }
 
-impl<'a, W> DiagnosticWriter<'a, W>
+impl<'a, W> Writer<'a, W>
 where
     W: Write,
 {
@@ -23,12 +23,17 @@ where
     pub fn write(&mut self, diagnostic: &Diagnostic) -> io::Result<()> {
         let color = match diagnostic.severity() {
             Severity::Error => AnsiColors::Red,
+            Severity::Warning => AnsiColors::Yellow,
         };
 
         self.write_header(diagnostic)?;
 
         for label in diagnostic.labels() {
             self.write_label(color, label)?;
+        }
+
+        if let Some(note) = diagnostic.note() {
+            self.write_note(2, color, note)?;
         }
 
         writeln!(self.writer)?;
@@ -39,6 +44,7 @@ where
     fn write_header(&mut self, diagnostic: &Diagnostic) -> io::Result<()> {
         match diagnostic.severity() {
             Severity::Error => write!(self.writer, "{}", "error".red().bold())?,
+            Severity::Warning => write!(self.writer, "{}", "warning".yellow().bold())?,
         }
 
         writeln!(
@@ -117,6 +123,30 @@ where
             "^".repeat(highlight_count).color(color).bold(),
             label.message().color(color).bold(),
         )?;
+
+        Ok(())
+    }
+
+    fn write_note(&mut self, indent: usize, _color: AnsiColors, note: &str) -> io::Result<()> {
+        writeln!(self.writer, "{}{}", " ".repeat(indent), "|".blue().bold())?;
+
+        for (i, line) in note.lines().enumerate() {
+            if i == 0 {
+                write!(
+                    self.writer,
+                    "{}{} {} ",
+                    " ".repeat(indent),
+                    "=".blue().bold(),
+                    "note:".bold(),
+                )?;
+            } else if !line.is_empty() {
+                write!(self.writer, "{}{} ", " ".repeat(indent), "~".blue().bold())?;
+            } else {
+                write!(self.writer, "{}{} ", " ".repeat(indent), "|".blue().bold())?;
+            }
+
+            writeln!(self.writer, "{}", line)?;
+        }
 
         Ok(())
     }

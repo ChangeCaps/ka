@@ -24,6 +24,10 @@ impl Lowerer<'_> {
         ty: Option<&ir::Ty>,
         span: Span,
     ) {
+        if let Some(target) = self.subst_shallow(target).cloned() {
+            return self.constrain_tag(&target, name, ty, span);
+        }
+
         if let &ir::Ty::Infer(id) = target
             && let ir::Bounds::None = self.bounds[id]
         {

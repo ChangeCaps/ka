@@ -8,7 +8,7 @@ use crate::{
 pub enum Pat {
     Wild(WildPat),
     Bind(BindPat),
-    Tag(TagPat),
+    Variant(VariantPat),
     Tuple(TuplePat),
     Error(ErrorPat),
 }
@@ -27,7 +27,7 @@ pub struct BindPat {
 }
 
 #[derive(Clone, Debug)]
-pub struct TagPat {
+pub struct VariantPat {
     pub name: &'static str,
     pub pat: Option<Box<Pat>>,
     pub ty: Ty,
@@ -56,7 +56,7 @@ impl Pat {
         match self {
             Pat::Wild(pat) => pat.ty.clone(),
             Pat::Bind(pat) => pat.ty.clone(),
-            Pat::Tag(pat) => pat.ty.clone(),
+            Pat::Variant(pat) => pat.ty.clone(),
             Pat::Tuple(pat) => pat.ty.clone(),
             Pat::Error(pat) => pat.ty.clone(),
         }
@@ -66,7 +66,7 @@ impl Pat {
         match self {
             Pat::Wild(pat) => pat.span,
             Pat::Bind(pat) => pat.span,
-            Pat::Tag(pat) => pat.span,
+            Pat::Variant(pat) => pat.span,
             Pat::Tuple(pat) => pat.span,
             Pat::Error(pat) => pat.span,
         }

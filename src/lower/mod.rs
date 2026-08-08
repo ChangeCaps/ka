@@ -12,6 +12,7 @@ use crate::{
 };
 
 mod def;
+mod exhaust;
 mod expr;
 mod infer;
 mod pat;
@@ -25,7 +26,6 @@ pub struct Lowerer<'a> {
     modules: Vec<(Id<ir::Scope>, Box<[ast::Def]>)>,
 
     externs: Arena<ir::Extern>,
-    lambdas: Arena<ir::Lambda>,
     consts: Arena<ir::Const>,
 
     aliases: Arena<ir::Alias>,
@@ -51,7 +51,6 @@ impl<'a> Lowerer<'a> {
             modules: Vec::new(),
 
             externs: Arena::new(),
-            lambdas: Arena::new(),
             consts: Arena::new(),
 
             aliases: Arena::new(),
@@ -103,7 +102,6 @@ impl<'a> Lowerer<'a> {
 
         ir::Program {
             externs: self.externs,
-            lambdas: self.lambdas,
             consts: self.consts,
             order,
 
@@ -244,34 +242,28 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        let mut stack = self
-            .consts
-            .keys()
-            .filter(|id| {
-                // check if `id` has any dependencies besides itself
-                dependencies
-                    .get(id)
-                    .is_none_or(|deps| deps.is_empty() || deps.len() == 1 && deps.contains_key(id))
-            })
-            .collect::<VecDeque<_>>();
-
-        let mut dependents: HashMap<Id<ir::Const>, HashSet<Id<ir::Const>>> = HashMap::new();
-
-        for (r#const, dependencies) in &dependencies {
-            for dependency in dependencies.keys() {
-                dependents.entry(*dependency).or_default().insert(*r#const);
+        fn recurse(
+            r#const: Id<ir::Const>,
+            seen: &mut HashSet<Id<ir::Const>>,
+            order: &mut Vec<Id<ir::Const>>,
+            dependencies: &HashMap<Id<ir::Const>, Dependencies>,
+        ) {
+            if !seen.insert(r#const) {
+                return;
             }
+
+            for (dependency, _) in dependencies.get(&r#const).into_iter().flatten() {
+                recurse(*dependency, seen, order, dependencies);
+            }
+
+            order.push(r#const);
         }
 
+        let mut seen = HashSet::new();
         let mut order = Vec::new();
 
-        while let Some(id) = stack.pop_front() {
-            if order.contains(&id) {
-                continue;
-            }
-
-            order.push(id);
-            stack.extend(dependents.get(&id).into_iter().flatten());
+        for r#const in self.consts.keys() {
+            recurse(r#const, &mut seen, &mut order, &dependencies);
         }
 
         order

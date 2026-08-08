@@ -64,6 +64,10 @@ impl<T> Arena<T> {
         })
     }
 
+    pub fn values(&self) -> impl DoubleEndedIterator<Item = &T> {
+        self.items.iter().filter_map(|item| item.as_ref())
+    }
+
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (Id<T>, &T)> {
         self.items.iter().enumerate().filter_map(|(idx, item)| {
             let id = Id {

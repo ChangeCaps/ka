@@ -1,15 +1,15 @@
 use crate::{
     arena::Id,
-    ir::{Alias, Const, Lambda, Var},
+    ir::{Alias, Const, Var},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ScopeKind {
-    Lambda(Id<Lambda>),
-    Const(Id<Const>),
-
-    Module,
     Block,
+    Bind,
+    Lambda,
+    Module,
+    Const(Id<Const>),
 }
 
 #[derive(Clone, Debug)]

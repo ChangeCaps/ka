@@ -1,8 +1,15 @@
-use std::{collections::HashMap, fmt, hash::BuildHasherDefault, io, mem, rc::Rc};
+use std::{
+    collections::HashMap,
+    fmt,
+    hash::BuildHasherDefault,
+    io::{self, Write},
+    mem,
+    rc::Rc,
+};
 
 use crate::{
     arena::Id,
-    ir::{self, BinOp, ConstKind, Expr, Lambda, Pat, Program, Var, VarKind},
+    ir::{self, BinOp, ConstKind, Expr, Pat, Program, Var, VarKind},
 };
 
 type BuildFastHasher = BuildHasherDefault<seahash::SeaHasher>;
@@ -177,7 +184,8 @@ impl fmt::Display for Value<'_> {
 #[derive(Clone, Debug)]
 pub enum LambdaValue<'a> {
     Intern {
-        lambda: &'a Lambda,
+        pat: &'a Pat,
+        expr: &'a Expr,
         vars: FastHashMap<Id<Var>, Value<'a>>,
     },
 
@@ -203,6 +211,7 @@ pub enum MonadValue<'a> {
         input: Value<'a>,
         pat: &'a Pat,
         expr: &'a Expr,
+        vars: FastHashMap<Id<Var>, Value<'a>>,
     },
 }
 
@@ -217,11 +226,17 @@ impl fmt::Debug for MonadValue<'_> {
         match self {
             Self::Pure(value) => f.debug_tuple("Pure").field(value).finish(),
             Self::Extern(..) => f.debug_tuple("Extern").finish(),
-            Self::Bind { input, pat, expr } => f
+            Self::Bind {
+                input,
+                pat,
+                expr,
+                vars,
+            } => f
                 .debug_struct("Bind")
                 .field("input", input)
                 .field("pat", pat)
                 .field("expr", expr)
+                .field("vars", vars)
                 .finish(),
         }
     }
@@ -258,7 +273,10 @@ impl<'a> Runtime<'a> {
         rt.add_extern("print", 1, |args| {
             Value::monad(move || {
                 let s = args[0].as_string().unwrap();
-                print!("{s}");
+
+                let mut stdout = io::stdout().lock();
+                let _ = stdout.write_all(s.as_bytes());
+                let _ = stdout.flush();
 
                 Value::unit()
             })
@@ -314,7 +332,8 @@ impl<'a> Runtime<'a> {
                 && let Expr::Lambda(ref expr) = r#const.expr
             {
                 Value::new(ValueKind::Lambda(LambdaValue::Intern {
-                    lambda: &self.program.lambdas[expr.lambda],
+                    pat: &expr.input,
+                    expr: &expr.expr,
                     vars: HashMap::default(),
                 }))
             } else {
@@ -345,7 +364,7 @@ impl<'a> Runtime<'a> {
                 }
             },
 
-            Pat::Tag(pat) => {
+            Pat::Variant(pat) => {
                 let ValueKind::Variant(_, value) = value.kind() else {
                     unreachable!();
                 };
@@ -375,7 +394,7 @@ impl<'a> Runtime<'a> {
         match pat {
             Pat::Wild(..) | Pat::Bind(..) => true,
 
-            Pat::Tag(pat) => {
+            Pat::Variant(pat) => {
                 let ValueKind::Variant(name, value) = value.kind() else {
                     unreachable!();
                 };
@@ -407,7 +426,12 @@ impl<'a> Runtime<'a> {
 
             MonadValue::Extern(f) => f(),
 
-            MonadValue::Bind { input, pat, expr } => {
+            MonadValue::Bind {
+                input,
+                pat,
+                expr,
+                vars,
+            } => {
                 let ValueKind::Monad(monad) = input.kind() else {
                     unreachable!();
                 };
@@ -415,6 +439,7 @@ impl<'a> Runtime<'a> {
                 let input = self.eval_monad(monad.clone());
 
                 let mut frame = Frame::new();
+                frame.vars = vars;
                 self.assign_pat(&mut frame, pat, input);
 
                 let monad = self.eval_expr(&frame, expr);
@@ -451,7 +476,10 @@ impl<'a> Runtime<'a> {
                     }))
                 }
 
-                VarKind::Local => frame.vars.get(&expr.var).unwrap().clone(),
+                VarKind::Local => match frame.vars.get(&expr.var).cloned() {
+                    Some(value) => value,
+                    None => unreachable!("{}", self.program.vars[expr.var].name),
+                },
             },
 
             Expr::Let(expr) => {
@@ -464,10 +492,18 @@ impl<'a> Runtime<'a> {
             Expr::Bind(expr) => {
                 let input = self.eval_expr(frame, &expr.input);
 
+                let vars = self.program.scopes[expr.scope]
+                    .caps
+                    .iter()
+                    .copied()
+                    .map(|id| (id, frame.vars[&id].clone()))
+                    .collect();
+
                 Value::new(ValueKind::Monad(MonadValue::Bind {
                     input: input.clone(),
                     pat: &expr.pat,
                     expr: &expr.expr,
+                    vars,
                 }))
             }
 
@@ -485,12 +521,12 @@ impl<'a> Runtime<'a> {
                 };
 
                 match value {
-                    LambdaValue::Intern { lambda, vars } => {
+                    LambdaValue::Intern { pat, expr, vars } => {
                         let mut frame = Frame::new();
                         frame.vars = mem::take(vars);
 
-                        self.assign_pat(&mut frame, &lambda.input, input);
-                        self.eval_expr(&frame, &lambda.expr)
+                        self.assign_pat(&mut frame, pat, input);
+                        self.eval_expr(&frame, expr)
                     }
 
                     LambdaValue::Extern { name, args } => {
@@ -507,7 +543,7 @@ impl<'a> Runtime<'a> {
             }
 
             Expr::Lambda(expr) => {
-                let vars = expr
+                let vars = self.program.scopes[expr.scope]
                     .caps
                     .iter()
                     .copied()
@@ -515,7 +551,8 @@ impl<'a> Runtime<'a> {
                     .collect();
 
                 Value::new(ValueKind::Lambda(LambdaValue::Intern {
-                    lambda: &self.program.lambdas[expr.lambda],
+                    pat: &expr.input,
+                    expr: &expr.expr,
                     vars,
                 }))
             }

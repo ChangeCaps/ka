@@ -13,12 +13,14 @@ pub use writer::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
     Error,
+    Warning,
 }
 
 impl fmt::Display for Severity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Error => write!(f, "error"),
+            Self::Warning => write!(f, "warning"),
         }
     }
 }
@@ -28,6 +30,7 @@ pub struct Diagnostic {
     severity: Severity,
     message: String,
     labels: Vec<Label>,
+    note: Option<String>,
 }
 
 impl Diagnostic {
@@ -36,11 +39,21 @@ impl Diagnostic {
             severity,
             message: message.to_string(),
             labels: Vec::new(),
+            note: None,
         }
     }
 
     pub fn error(message: impl ToString) -> Self {
         Self::new(Severity::Error, message)
+    }
+
+    pub fn warning(message: impl ToString) -> Self {
+        Self::new(Severity::Warning, message)
+    }
+
+    pub fn with_note(mut self, note: impl ToString) -> Self {
+        self.note = Some(note.to_string());
+        self
     }
 
     pub fn with_label(mut self, span: Span, message: impl ToString) -> Self {
@@ -65,6 +78,10 @@ impl Diagnostic {
 
     pub fn labels(&self) -> &[Label] {
         &self.labels
+    }
+
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
     }
 }
 

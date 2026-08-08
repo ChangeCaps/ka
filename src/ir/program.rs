@@ -2,13 +2,12 @@ use std::collections::HashMap;
 
 use crate::{
     arena::{Arena, Id},
-    ir::{Bounds, Const, Extern, Lambda, Scope, Ty, Var},
+    ir::{Bounds, Const, Extern, Scope, Ty, Var},
 };
 
 #[derive(Clone, Debug)]
 pub struct Program {
     pub externs: Arena<Extern>,
-    pub lambdas: Arena<Lambda>,
     pub consts: Arena<Const>,
     pub order: Vec<Id<Const>>,
 

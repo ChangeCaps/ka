@@ -1,11 +1,9 @@
-use std::collections::{HashMap, hash_map::Entry};
-
 use crate::{
     arena::Id,
     ast,
     diagnostic::{Diagnostic, Span},
     ir,
-    lower::{Generics, Lowerer},
+    lower::{Generics, Lowerer, exhaust},
 };
 
 impl Lowerer<'_> {
@@ -261,10 +259,10 @@ impl Lowerer<'_> {
     fn do_expr_block(&mut self, scope: Id<ir::Scope>, stmts: &[ast::DoStmt]) -> ir::Expr {
         enum LetOrBind {
             Let(ir::Pat, ir::Expr),
-            Bind(ir::Pat, ir::Expr),
+            Bind(Id<ir::Scope>, ir::Pat, ir::Expr),
         }
 
-        let scope = self.add_scope(ir::ScopeKind::Block, scope);
+        let mut scope = self.add_scope(ir::ScopeKind::Block, scope);
 
         let defs = stmts.iter().filter_map(|stmt| match stmt {
             ast::DoStmt::Def(def) => Some(def),
@@ -288,10 +286,14 @@ impl Lowerer<'_> {
             match stmt {
                 ast::DoStmt::Def(def) => {
                     if let ast::Def::Let(def) = def {
+                        if def.is_bind {
+                            scope = self.add_scope(ir::ScopeKind::Bind, scope);
+                        }
+
                         let (pat, expr) = self.do_let_def(scope, def);
 
                         let expr = match def.is_bind {
-                            true => LetOrBind::Bind(pat, expr),
+                            true => LetOrBind::Bind(scope, pat, expr),
                             false => LetOrBind::Let(pat, expr),
                         };
 
@@ -300,8 +302,11 @@ impl Lowerer<'_> {
                 }
 
                 ast::DoStmt::Expr(expr) => {
-                    let span = expr.span();
+                    if !is_last {
+                        scope = self.add_scope(ir::ScopeKind::Bind, scope);
+                    }
 
+                    let span = expr.span();
                     let expr = self.expr(scope, expr);
                     let ty = expr.ty();
 
@@ -312,7 +317,7 @@ impl Lowerer<'_> {
                         output = expr;
                     } else {
                         let pat = ir::Pat::Wild(ir::WildPat { ty, span });
-                        exprs.push(LetOrBind::Bind(pat, expr))
+                        exprs.push(LetOrBind::Bind(scope, pat, expr))
                     }
                 }
             }
@@ -325,7 +330,8 @@ impl Lowerer<'_> {
                 expr: Box::new(expr),
             }),
 
-            LetOrBind::Bind(pat, input) => ir::Expr::Bind(ir::BindExpr {
+            LetOrBind::Bind(scope, pat, input) => ir::Expr::Bind(ir::BindExpr {
+                scope,
                 pat,
                 input: Box::new(input),
                 expr: Box::new(expr),
@@ -360,134 +366,93 @@ impl Lowerer<'_> {
 
         let ty = self.add_inferred_type();
 
-        let arms = expr
-            .arms
-            .iter()
-            .map(|arm| {
-                let scope = self.add_scope(ir::ScopeKind::Block, scope);
-                let pat = self.pat(scope, ir::VarKind::Local, &arm.pat);
-                let expr = self.expr(scope, &arm.expr);
+        let mut arms = Vec::new();
+        let mut closed_column = exhaust::Column::Wild;
+        let mut exhaustiveness_matrix = exhaust::Matrix::new();
 
-                // ensure that the type of all arm expressions are the same
-                self.unify(&ty, &expr.ty(), arm.expr.span());
+        for arm in &expr.arms {
+            let span = arm.expr.span();
+            let scope = self.add_scope(ir::ScopeKind::Block, scope);
 
-                ir::Arm { pat, expr }
-            })
-            .collect::<Vec<_>>();
+            let arm = ir::Arm {
+                pat: self.pat(scope, ir::VarKind::Local, &arm.pat),
+                expr: self.expr(scope, &arm.expr),
+            };
 
-        let pats = arms.iter().map(|arm| &arm.pat).collect::<Vec<_>>();
-        let pats_ty = self.pats_ty(&pats);
+            self.unify(&ty, &arm.expr.ty(), span);
+
+            let pat = exhaust::Pat::new(&arm.pat);
+            let column = exhaust::Column::from_pat(&pat);
+            let row = exhaust::Row::new(pat);
+
+            let Ok(column) = closed_column.merge(&column) else {
+                let diagnostic = Diagnostic::error("invalid pattern")
+                    .with_label(arm.pat.span(), "found here")
+                    .with_label(expr.span, "in `match` here");
+
+                self.emitter.emit(diagnostic);
+
+                continue;
+            };
+
+            closed_column = column;
+            exhaustiveness_matrix.push(row);
+
+            arms.push(arm);
+        }
+
+        let open_column = exhaustiveness_matrix.open_column(closed_column);
+
+        let mut usefulness_matrix = exhaust::Matrix::new();
+        for arm in &arms {
+            let pat = exhaust::Pat::new(&arm.pat);
+            let row = exhaust::Row::new(pat);
+
+            if !usefulness_matrix.is_useful(&open_column, &row) {
+                let diagnostic = Diagnostic::warning("unreachable pattern")
+                    .with_label(arm.pat.span(), "found here");
+
+                self.emitter.emit(diagnostic);
+            }
+
+            usefulness_matrix.push(row);
+        }
+
+        let unexchausted_pats = exhaustiveness_matrix.unexhausted_pats(&open_column);
+
+        if !unexchausted_pats.is_empty() {
+            let mut note = String::from("ensure that all possible cases are handled\n\n");
+
+            for pat in unexchausted_pats {
+                note += "        ";
+                note += &pat.format();
+                note += "\n";
+            }
+
+            note += "\n";
+
+            let diagnostic = Diagnostic::error("`match` expression is not exhaustive")
+                .with_label(expr.span, "found here")
+                .with_note(note);
+
+            self.emitter.emit(diagnostic);
+        }
 
         let expr = {
             let target = self.expr(scope, &expr.expr);
-            self.unify(&target.ty(), &pats_ty, expr.span);
+
+            let ty = self.match_input_type(
+                &open_column,
+                arms.iter().map(|arm| &arm.pat),
+                expr.expr.span(),
+            );
+
+            self.unify(&target.ty(), &ty, expr.span);
 
             Box::new(target)
         };
 
         ir::Expr::Match(ir::MatchExpr { expr, arms, ty })
-    }
-
-    fn pats_ty(&mut self, pats: &[&ir::Pat]) -> ir::Ty {
-        let tame = pats
-            .iter()
-            .copied()
-            .filter(|pat| !pat.is_wild())
-            .collect::<Vec<_>>();
-
-        let ty = match tame.first() {
-            Some(first) => match first {
-                ir::Pat::Tuple(first) => self.tuple_pats_ty(first, &tame),
-                ir::Pat::Tag(..) => self.tag_pats_ty(&tame),
-
-                ir::Pat::Wild(..) | ir::Pat::Bind(..) | ir::Pat::Error(..) => unreachable!(),
-            },
-
-            _ => self.add_inferred_type(),
-        };
-
-        for pat in pats.iter().copied().filter(|pat| pat.is_wild()) {
-            self.unify(&ty, &pat.ty(), pat.span());
-        }
-
-        ty
-    }
-
-    fn tuple_pats_ty(&mut self, first: &ir::TuplePat, pats: &[&ir::Pat]) -> ir::Ty {
-        let mut fields = vec![Vec::new(); first.fields.len()];
-
-        for pat in pats {
-            let ir::Pat::Tuple(pat) = pat else {
-                let diagnostic = Diagnostic::error("invalid pattern, expected tuple")
-                    .with_label(pat.span(), "found here");
-
-                self.emitter.emit(diagnostic);
-
-                continue;
-            };
-
-            if pat.fields.len() != fields.len() {
-                let diagnostic = Diagnostic::error(format!(
-                    "invalid pattern, expected `{}-tuple`, but found `{}-tuple`",
-                    fields.len(),
-                    pat.fields.len(),
-                ))
-                .with_label(pat.span, "here");
-
-                self.emitter.emit(diagnostic);
-
-                continue;
-            }
-
-            for (pats, field) in fields.iter_mut().zip(&pat.fields) {
-                pats.push(field);
-            }
-        }
-
-        let fields = fields
-            .into_iter()
-            .map(|pats| self.pats_ty(&pats))
-            .collect::<Vec<_>>();
-
-        ir::Ty::Tuple(fields)
-    }
-
-    fn tag_pats_ty(&mut self, pats: &[&ir::Pat]) -> ir::Ty {
-        let mut variants: HashMap<&str, Option<Vec<&ir::Pat>>> = HashMap::new();
-
-        for pat in pats {
-            let ir::Pat::Tag(pat) = pat else {
-                let diagnostic = Diagnostic::error("invalid pattern, expected tag")
-                    .with_label(pat.span(), "found here");
-
-                self.emitter.emit(diagnostic);
-
-                continue;
-            };
-
-            match variants.entry(pat.name) {
-                Entry::Occupied(mut entry) => match (entry.get_mut(), &pat.pat) {
-                    (Some(pats), Some(pat)) => pats.push(pat),
-                    (None, None) => {}
-                    (_, _) => {}
-                },
-
-                Entry::Vacant(entry) => {
-                    let pats = pat.pat.as_ref().map(|pat| vec![pat.as_ref()]);
-                    entry.insert(pats);
-                }
-            }
-        }
-
-        let variants = variants
-            .into_iter()
-            .map(|(name, pats)| {
-                let ty = pats.map(|pats| self.pats_ty(&pats));
-                ir::Variant { name, ty }
-            })
-            .collect::<Vec<_>>();
-
-        ir::Ty::Union(ir::UnionTy { variants })
     }
 
     fn error_expr(&mut self, _span: Span) -> ir::Expr {

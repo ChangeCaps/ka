@@ -131,34 +131,24 @@ impl Lowerer<'_> {
         let lambdas = params
             .iter()
             .map(|pat| {
-                let lambda = self.lambdas.reserve();
-                scope = self.add_scope(ir::ScopeKind::Lambda(lambda), scope);
-
+                scope = self.add_scope(ir::ScopeKind::Lambda, scope);
                 let pat = self.pat(scope, ir::VarKind::Local, pat);
-                (lambda, scope, pat)
+                (scope, pat)
             })
             .collect::<Vec<_>>();
 
         let expr = self.expr(scope, expr);
 
-        lambdas
-            .into_iter()
-            .rfold(expr, |expr, (lambda, scope, input)| {
-                let ty = ir::Ty::lambda(input.ty(), expr.ty());
+        lambdas.into_iter().rfold(expr, |expr, (scope, input)| {
+            let ty = ir::Ty::lambda(input.ty(), expr.ty());
+            let expr = Box::new(expr);
 
-                self.lambdas.insert(
-                    lambda,
-                    ir::Lambda {
-                        scope,
-                        input,
-                        expr,
-                        ty: ty.clone(),
-                    },
-                );
-
-                let caps = self.scopes[scope].caps.clone();
-
-                ir::Expr::Lambda(ir::LambdaExpr { lambda, caps, ty })
+            ir::Expr::Lambda(ir::LambdaExpr {
+                scope,
+                input,
+                expr,
+                ty,
             })
+        })
     }
 }

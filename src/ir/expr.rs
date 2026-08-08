@@ -1,6 +1,6 @@
 use crate::{
     arena::Id,
-    ir::{Lambda, Pat, Ty, Value, Var},
+    ir::{Pat, Scope, Ty, Value, Var},
 };
 
 #[derive(Clone, Debug)]
@@ -41,6 +41,7 @@ pub struct LetExpr {
 
 #[derive(Clone, Debug)]
 pub struct BindExpr {
+    pub scope: Id<Scope>,
     pub input: Box<Expr>,
     pub pat: Pat,
     pub expr: Box<Expr>,
@@ -61,8 +62,9 @@ pub struct CallExpr {
 
 #[derive(Clone, Debug)]
 pub struct LambdaExpr {
-    pub lambda: Id<Lambda>,
-    pub caps: Vec<Id<Var>>,
+    pub scope: Id<Scope>,
+    pub input: Pat,
+    pub expr: Box<Expr>,
     pub ty: Ty,
 }
 

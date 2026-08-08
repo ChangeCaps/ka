@@ -1,21 +1,21 @@
 mod r#const;
 mod expr;
 mod r#extern;
-mod lambda;
 mod pat;
 mod program;
 mod scope;
 mod ty;
 mod value;
 mod var;
+mod writer;
 
 pub use r#const::*;
 pub use expr::*;
 pub use r#extern::*;
-pub use lambda::*;
 pub use pat::*;
 pub use program::*;
 pub use scope::*;
 pub use ty::*;
 pub use value::*;
 pub use var::*;
+pub use writer::*;

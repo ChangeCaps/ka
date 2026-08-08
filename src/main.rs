@@ -2,7 +2,7 @@ use std::{ffi, fs, io, path::Path};
 
 use ka::{
     ast,
-    diagnostic::{Diagnostic, DiagnosticWriter, File, Files, Severity},
+    diagnostic::{Diagnostic, File, Files, Severity},
     intern::Interner,
     lex::Tokens,
     lower::Lowerer,
@@ -52,7 +52,7 @@ impl Compiler {
 
         let program = lowerer.finish();
 
-        let mut writer = DiagnosticWriter::new(io::stderr(), &self.files);
+        let mut writer = ka::diagnostic::Writer::new(io::stderr(), &self.files);
 
         for diagnostic in &self.emitter {
             let _ = writer.write(diagnostic);
