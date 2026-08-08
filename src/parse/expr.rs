@@ -249,7 +249,7 @@ fn mul_div(parser: &mut Parser) -> Expr {
     binary(
         parser,
         &[(Token::Star, BinOp::Mul), (Token::Slash, BinOp::Div)],
-        tag,
+        variant,
     )
 }
 
@@ -270,7 +270,7 @@ fn binary(parser: &mut Parser, ops: &[(Token, BinOp)], prev: impl Fn(&mut Parser
     }
 }
 
-fn tag(parser: &mut Parser) -> Expr {
+fn variant(parser: &mut Parser) -> Expr {
     if !parser.is(Token::Colon) {
         return call(parser);
     }

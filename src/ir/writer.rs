@@ -19,13 +19,13 @@ where
     }
 
     pub fn write(&mut self) -> io::Result<()> {
-        for r#const in self.program.consts.values() {
-            write!(self.writer, "const ")?;
-            self.write_pat(&r#const.pat)?;
+        for global in self.program.globals.values() {
+            write!(self.writer, "global ")?;
+            self.write_pat(&global.pat)?;
             write!(self.writer, " =")?;
 
             self.write_line(1)?;
-            self.write_expr(1, &r#const.expr)?;
+            self.write_expr(1, &global.expr)?;
 
             writeln!(self.writer)?;
             writeln!(self.writer)?;

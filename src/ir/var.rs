@@ -1,11 +1,11 @@
 use crate::{
     arena::Id,
-    ir::{Const, Extern, Ty},
+    ir::{Extern, Global, Ty},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum VarKind {
-    Const(Id<Const>),
+    Global(Id<Global>),
     Extern(Id<Extern>),
     Local,
 }

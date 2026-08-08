@@ -76,7 +76,7 @@ impl Lowerer<'_> {
 
                 if *is_open {
                     for variant in variants {
-                        self.constrain_tag(&ty, variant.name, variant.ty.as_ref(), span);
+                        self.constrain_variant(&ty, variant.name, variant.ty.as_ref(), span);
                     }
                 } else {
                     let union = ir::Ty::Union(ir::UnionTy { variants });

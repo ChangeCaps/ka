@@ -1,6 +1,6 @@
 use crate::{
     arena::Id,
-    ir::{Alias, Const, Var},
+    ir::{Alias, Global, Var},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -9,7 +9,7 @@ pub enum ScopeKind {
     Bind,
     Lambda,
     Module,
-    Const(Id<Const>),
+    Global(Id<Global>),
 }
 
 #[derive(Clone, Debug)]

@@ -18,7 +18,7 @@ impl Lowerer<'_> {
             ast::Pat::Wild(pat) => self.wild_pat(scope, kind, pat),
             ast::Pat::Bind(pat) => self.bind_pat(scope, kind, pat),
             ast::Pat::Tuple(pat) => self.tuple_pat(scope, kind, pat),
-            ast::Pat::Tag(pat) => self.tag_pat(scope, kind, pat),
+            ast::Pat::Variant(pat) => self.variant_pat(scope, kind, pat),
             ast::Pat::Error(span) => self.error_pat(*span),
         }
     }
@@ -45,7 +45,7 @@ impl Lowerer<'_> {
 
     fn bind_pat(&mut self, scope: Id<ir::Scope>, kind: ir::VarKind, pat: &ast::BindPat) -> ir::Pat {
         if self.find_var(scope, pat.name).is_some()
-            && matches!(self.scopes[scope].kind, ir::ScopeKind::Const(..))
+            && matches!(self.scopes[scope].kind, ir::ScopeKind::Global(..))
         {
             return self.duplicate_variable_binding(pat.span, pat.name);
         }
@@ -82,7 +82,12 @@ impl Lowerer<'_> {
         ir::Pat::Tuple(ir::TuplePat { fields, ty, span })
     }
 
-    fn tag_pat(&mut self, scope: Id<ir::Scope>, kind: ir::VarKind, pat: &ast::TagPat) -> ir::Pat {
+    fn variant_pat(
+        &mut self,
+        scope: Id<ir::Scope>,
+        kind: ir::VarKind,
+        pat: &ast::VariantPat,
+    ) -> ir::Pat {
         let Some(name) = pat.name else {
             return self.error_pat(pat.span);
         };

@@ -17,7 +17,7 @@ impl Lowerer<'_> {
         ir::Ty::Infer(id)
     }
 
-    pub(super) fn constrain_tag(
+    pub(super) fn constrain_variant(
         &mut self,
         target: &ir::Ty,
         name: &'static str,
@@ -25,7 +25,7 @@ impl Lowerer<'_> {
         span: Span,
     ) {
         if let Some(target) = self.subst_shallow(target).cloned() {
-            return self.constrain_tag(&target, name, ty, span);
+            return self.constrain_variant(&target, name, ty, span);
         }
 
         if let &ir::Ty::Infer(id) = target
@@ -86,12 +86,12 @@ impl Lowerer<'_> {
 
         if let ir::Ty::Alias(target) = target {
             let target = self.instantiate_alias(target);
-            self.constrain_tag(&target, name, ty, span);
+            self.constrain_variant(&target, name, ty, span);
             return;
         }
 
         let diagnostic = Diagnostic::error(format!(
-            "constrain::tag, `{}`, {}, {:?}",
+            "constrain::variant, `{}`, {}, {:?}",
             self.format_ty(target),
             name,
             ty,
@@ -473,7 +473,7 @@ impl Lowerer<'_> {
 
             ir::Bounds::Union(ref target) => {
                 for variant in target.variants.clone() {
-                    self.constrain_tag(ty, variant.name, variant.ty.as_ref(), span);
+                    self.constrain_variant(ty, variant.name, variant.ty.as_ref(), span);
                 }
             }
 
@@ -504,11 +504,11 @@ impl Lowerer<'_> {
 
             (ir::Ty::Union(lhs_union), ir::Ty::Union(rhs_union)) => {
                 for lhs in &lhs_union.variants {
-                    self.constrain_tag(rhs, lhs.name, lhs.ty.as_ref(), span);
+                    self.constrain_variant(rhs, lhs.name, lhs.ty.as_ref(), span);
                 }
 
                 for rhs in &rhs_union.variants {
-                    self.constrain_tag(lhs, rhs.name, rhs.ty.as_ref(), span);
+                    self.constrain_variant(lhs, rhs.name, rhs.ty.as_ref(), span);
                 }
             }
 

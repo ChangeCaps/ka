@@ -130,12 +130,12 @@ impl Lowerer<'_> {
             .find_map(|import| self.find_alias(import.scope, name))
     }
 
-    pub(super) fn current_const(&self, scope: Id<ir::Scope>) -> Id<ir::Const> {
-        if let ir::ScopeKind::Const(r#const) = self.scopes[scope].kind {
-            return r#const;
+    pub(super) fn current_global(&self, scope: Id<ir::Scope>) -> Id<ir::Global> {
+        if let ir::ScopeKind::Global(global) = self.scopes[scope].kind {
+            return global;
         }
 
         let parent = self.scopes[scope].parent.unwrap();
-        self.current_const(parent)
+        self.current_global(parent)
     }
 }

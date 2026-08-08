@@ -178,7 +178,7 @@ impl Lowerer<'_> {
 
             if variants.iter().any(|v| v.name == name) {
                 let diagnostic =
-                    Diagnostic::error(format!("duplicate definition of tag `:{}`", name))
+                    Diagnostic::error(format!("duplicate definition of variant `:{}`", name))
                         .with_label(variant.span, "here");
 
                 self.emitter.emit(diagnostic);

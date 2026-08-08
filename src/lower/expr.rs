@@ -50,9 +50,9 @@ impl Lowerer<'_> {
         };
 
         match self.vars[var].kind {
-            ir::VarKind::Const(target) => {
+            ir::VarKind::Global(target) => {
                 let ty = self.add_inferred_type();
-                let current = self.current_const(scope);
+                let current = self.current_global(scope);
 
                 self.dependencies
                     .entry(current)
@@ -116,7 +116,7 @@ impl Lowerer<'_> {
         let ty = self.add_inferred_type();
         let payload = expr.as_deref().map(ir::Expr::ty);
 
-        self.constrain_tag(&ty, name, payload.as_ref(), span);
+        self.constrain_variant(&ty, name, payload.as_ref(), span);
 
         ir::Expr::Variant(ir::VariantExpr { name, expr, ty })
     }

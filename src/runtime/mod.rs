@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     arena::Id,
-    ir::{self, BinOp, ConstKind, Expr, Pat, Program, Var, VarKind},
+    ir::{self, BinOp, Expr, GlobalKind, Pat, Program, Var, VarKind},
 };
 
 type BuildFastHasher = BuildHasherDefault<seahash::SeaHasher>;
@@ -18,7 +18,7 @@ type ExternFn<'a> = Rc<dyn Fn(Vec<Value<'a>>) -> Value<'a>>;
 
 pub struct Runtime<'a> {
     program: &'a Program,
-    consts: FastHashMap<Id<Var>, Value<'a>>,
+    globals: FastHashMap<Id<Var>, Value<'a>>,
     externs: FastHashMap<&'static str, Extern<'a>>,
 }
 
@@ -259,7 +259,7 @@ impl<'a> Runtime<'a> {
     pub fn new(program: &'a Program) -> Self {
         let mut rt = Self {
             program,
-            consts: HashMap::default(),
+            globals: HashMap::default(),
             externs: HashMap::default(),
         };
 
@@ -326,10 +326,10 @@ impl<'a> Runtime<'a> {
         let mut frame = Frame::new();
 
         for id in self.program.order.iter().copied() {
-            let r#const = &self.program.consts[id];
+            let global = &self.program.globals[id];
 
-            let value = if r#const.kind == ConstKind::Lambda
-                && let Expr::Lambda(ref expr) = r#const.expr
+            let value = if global.kind == GlobalKind::Lambda
+                && let Expr::Lambda(ref expr) = global.expr
             {
                 Value::new(ValueKind::Lambda(LambdaValue::Intern {
                     pat: &expr.input,
@@ -337,14 +337,14 @@ impl<'a> Runtime<'a> {
                     vars: HashMap::default(),
                 }))
             } else {
-                self.eval_expr(&frame, &r#const.expr)
+                self.eval_expr(&frame, &global.expr)
             };
 
             if let ValueKind::Monad(monad) = value.kind() {
                 self.eval_monad(monad.clone());
             }
 
-            self.assign_pat(&mut frame, &r#const.pat, value);
+            self.assign_pat(&mut frame, &global.pat, value);
         }
     }
 
@@ -353,8 +353,8 @@ impl<'a> Runtime<'a> {
             Pat::Wild(..) => {}
 
             Pat::Bind(pat) => match self.program.vars[pat.var].kind {
-                VarKind::Const(..) => {
-                    self.consts.insert(pat.var, value);
+                VarKind::Global(..) => {
+                    self.globals.insert(pat.var, value);
                 }
 
                 VarKind::Extern(..) => unreachable!(),
@@ -461,7 +461,7 @@ impl<'a> Runtime<'a> {
             },
 
             Expr::Var(expr) => match self.program.vars[expr.var].kind {
-                VarKind::Const(_) => self.consts.get(&expr.var).unwrap().clone(),
+                VarKind::Global(_) => self.globals.get(&expr.var).unwrap().clone(),
 
                 VarKind::Extern(id) => {
                     let r#extern = &self.program.externs[id];

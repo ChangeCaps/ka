@@ -6,7 +6,7 @@ pub enum Pat {
     Wild(WildPat),
     Bind(BindPat),
     Tuple(TuplePat),
-    Tag(TagPat),
+    Variant(VariantPat),
     Error(Span),
 }
 
@@ -34,7 +34,7 @@ pub struct TuplePat {
 }
 
 #[derive(Clone, Debug)]
-pub struct TagPat {
+pub struct VariantPat {
     pub name: Option<&'static str>,
     pub pat: Option<Box<Pat>>,
     pub span: Span,
@@ -47,7 +47,7 @@ impl Pat {
             Pat::Wild(pat) => pat.span,
             Pat::Bind(pat) => pat.span,
             Pat::Tuple(pat) => pat.span,
-            Pat::Tag(pat) => pat.span,
+            Pat::Variant(pat) => pat.span,
             Pat::Error(span) => *span,
         }
     }

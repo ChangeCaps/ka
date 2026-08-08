@@ -1,6 +1,6 @@
-mod r#const;
 mod expr;
 mod r#extern;
+mod global;
 mod pat;
 mod program;
 mod scope;
@@ -9,9 +9,9 @@ mod value;
 mod var;
 mod writer;
 
-pub use r#const::*;
 pub use expr::*;
 pub use r#extern::*;
+pub use global::*;
 pub use pat::*;
 pub use program::*;
 pub use scope::*;

@@ -26,7 +26,7 @@ pub struct Lowerer<'a> {
     modules: Vec<(Id<ir::Scope>, Box<[ast::Def]>)>,
 
     externs: Arena<ir::Extern>,
-    consts: Arena<ir::Const>,
+    globals: Arena<ir::Global>,
 
     aliases: Arena<ir::Alias>,
     scopes: Arena<ir::Scope>,
@@ -36,11 +36,11 @@ pub struct Lowerer<'a> {
     subst: HashMap<Id<ir::Bounds>, ir::Ty>,
     cache: HashSet<u64>,
 
-    dependencies: HashMap<Id<ir::Const>, Dependencies>,
+    dependencies: HashMap<Id<ir::Global>, Dependencies>,
 }
 
-type Dependencies = HashMap<Id<ir::Const>, Vec<(ir::Ty, Span)>>;
-type LetDefState<'a> = (Id<ir::Const>, Id<ir::Scope>, ir::Pat, &'a ast::LetDef);
+type Dependencies = HashMap<Id<ir::Global>, Vec<(ir::Ty, Span)>>;
+type LetDefState<'a> = (Id<ir::Global>, Id<ir::Scope>, ir::Pat, &'a ast::LetDef);
 
 impl<'a> Lowerer<'a> {
     pub fn new(emitter: &'a mut dyn Emitter) -> Self {
@@ -51,7 +51,7 @@ impl<'a> Lowerer<'a> {
             modules: Vec::new(),
 
             externs: Arena::new(),
-            consts: Arena::new(),
+            globals: Arena::new(),
 
             aliases: Arena::new(),
             scopes: Arena::new(),
@@ -98,11 +98,11 @@ impl<'a> Lowerer<'a> {
 
         self.complete_let_defs(let_defs);
 
-        let order = self.resolve_const_deps();
+        let order = self.resolve_global_dependencies();
 
         ir::Program {
             externs: self.externs,
-            consts: self.consts,
+            globals: self.globals,
             order,
 
             scopes: self.scopes,
@@ -197,42 +197,42 @@ impl<'a> Lowerer<'a> {
                 continue;
             };
 
-            let r#const = self.consts.reserve();
+            let global = self.globals.reserve();
 
-            let kind = ir::VarKind::Const(r#const);
+            let kind = ir::VarKind::Global(global);
             let pat = self.register_let_def(scope, kind, def);
 
-            let_defs.push((r#const, scope, pat, def));
+            let_defs.push((global, scope, pat, def));
         }
 
         let_defs
     }
 
     fn complete_let_defs(&mut self, defs: Vec<LetDefState<'_>>) {
-        for (r#const, scope, pat, def) in defs {
-            let kind = ir::ScopeKind::Const(r#const);
+        for (global, scope, pat, def) in defs {
+            let kind = ir::ScopeKind::Global(global);
             let scope = self.add_scope(kind, scope);
 
             let expr = self.complete_let_def(scope, def);
             self.unify(&pat.ty(), &expr.ty(), def.span);
 
             let kind = match def.params.is_empty() {
-                true => ir::ConstKind::Lambda,
-                false => ir::ConstKind::Value,
+                true => ir::GlobalKind::Lambda,
+                false => ir::GlobalKind::Value,
             };
 
-            self.consts.insert(r#const, ir::Const { kind, pat, expr });
+            self.globals.insert(global, ir::Global { kind, pat, expr });
         }
     }
 
-    fn resolve_const_deps(&mut self) -> Vec<Id<ir::Const>> {
+    fn resolve_global_dependencies(&mut self) -> Vec<Id<ir::Global>> {
         let dependencies = mem::take(&mut self.dependencies);
 
-        for (r#const, deps) in &dependencies {
+        for (global, deps) in &dependencies {
             for (&dep, tys) in deps {
-                let mut ty = self.consts[dep].expr.ty();
+                let mut ty = self.globals[dep].expr.ty();
 
-                if !Self::depends_on(&dependencies, dep, *r#const) {
+                if !Self::depends_on(&dependencies, dep, *global) {
                     ty = self.instantiate(ty);
                 }
 
@@ -243,36 +243,36 @@ impl<'a> Lowerer<'a> {
         }
 
         fn recurse(
-            r#const: Id<ir::Const>,
-            seen: &mut HashSet<Id<ir::Const>>,
-            order: &mut Vec<Id<ir::Const>>,
-            dependencies: &HashMap<Id<ir::Const>, Dependencies>,
+            global: Id<ir::Global>,
+            seen: &mut HashSet<Id<ir::Global>>,
+            order: &mut Vec<Id<ir::Global>>,
+            dependencies: &HashMap<Id<ir::Global>, Dependencies>,
         ) {
-            if !seen.insert(r#const) {
+            if !seen.insert(global) {
                 return;
             }
 
-            for (dependency, _) in dependencies.get(&r#const).into_iter().flatten() {
+            for (dependency, _) in dependencies.get(&global).into_iter().flatten() {
                 recurse(*dependency, seen, order, dependencies);
             }
 
-            order.push(r#const);
+            order.push(global);
         }
 
         let mut seen = HashSet::new();
         let mut order = Vec::new();
 
-        for r#const in self.consts.keys() {
-            recurse(r#const, &mut seen, &mut order, &dependencies);
+        for global in self.globals.keys() {
+            recurse(global, &mut seen, &mut order, &dependencies);
         }
 
         order
     }
 
     fn depends_on(
-        dependencies: &HashMap<Id<ir::Const>, Dependencies>,
-        a: Id<ir::Const>,
-        b: Id<ir::Const>,
+        dependencies: &HashMap<Id<ir::Global>, Dependencies>,
+        a: Id<ir::Global>,
+        b: Id<ir::Global>,
     ) -> bool {
         let mut seen = HashSet::new();
         let mut stack = VecDeque::new();
