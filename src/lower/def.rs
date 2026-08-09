@@ -2,7 +2,7 @@ use crate::{
     arena::Id,
     ast,
     diagnostic::Diagnostic,
-    ir,
+    ir::{Alias, Bounds, Expr, LambdaExpr, Pat, Scope, ScopeKind, Ty, VarKind},
     lower::{
         Lowerer,
         ty::{Generic, Generics},
@@ -12,12 +12,31 @@ use crate::{
 impl Lowerer<'_> {
     pub(super) fn let_def(
         &mut self,
-        scope: Id<ir::Scope>,
-        kind: ir::VarKind,
+        scope: Id<Scope>,
+        kind: VarKind,
         def: &ast::LetDef,
-    ) -> (ir::Pat, ir::Expr) {
-        let expr = self.complete_let_def(scope, def);
-        let pat = self.register_let_def(scope, kind, def);
+    ) -> (Pat, Expr) {
+        if def.is_rec && def.params.is_empty() {
+            let diagnostic = Diagnostic::error("only functions are allowed to be recursive")
+                .with_label(def.span, "found here")
+                .with_note("try removing `rec`");
+
+            self.emitter.emit(diagnostic);
+        }
+
+        let (pat, expr) = match def.is_rec {
+            true => {
+                let pat = self.register_let_def(scope, kind, def);
+                let expr = self.complete_let_def(scope, def);
+                (pat, expr)
+            }
+
+            false => {
+                let expr = self.complete_let_def(scope, def);
+                let pat = self.register_let_def(scope, kind, def);
+                (pat, expr)
+            }
+        };
 
         self.unify(&pat.ty(), &expr.ty(), def.span);
 
@@ -26,10 +45,10 @@ impl Lowerer<'_> {
 
     pub(super) fn register_let_def(
         &mut self,
-        scope: Id<ir::Scope>,
-        kind: ir::VarKind,
+        scope: Id<Scope>,
+        kind: VarKind,
         def: &ast::LetDef,
-    ) -> ir::Pat {
+    ) -> Pat {
         if def.is_bind {
             let diagnostic = Diagnostic::error("`let` `<-` is only allowed in `do` blocks")
                 .with_label(def.span, "in `let` found here");
@@ -47,7 +66,7 @@ impl Lowerer<'_> {
         pat
     }
 
-    pub(super) fn complete_let_def(&mut self, scope: Id<ir::Scope>, def: &ast::LetDef) -> ir::Expr {
+    pub(super) fn complete_let_def(&mut self, scope: Id<Scope>, def: &ast::LetDef) -> Expr {
         if !def.params.is_empty() {
             let expr = self.let_lambda_def(scope, def);
             return expr;
@@ -56,10 +75,13 @@ impl Lowerer<'_> {
         self.expr(scope, &def.expr)
     }
 
-    pub(super) fn aliases(&mut self, scope: Id<ir::Scope>, defs: &[&ast::AliasDef]) {
+    pub(super) fn aliases<'a>(
+        &mut self,
+        defs: impl IntoIterator<Item = (Id<Scope>, &'a ast::AliasDef)>,
+    ) {
         let mut aliases = Vec::new();
 
-        for def in defs {
+        for (scope, def) in defs {
             if self.scopes[scope]
                 .aliases
                 .iter()
@@ -77,7 +99,7 @@ impl Lowerer<'_> {
             let mut params = Vec::new();
 
             for param in &def.params {
-                let bounds = self.bounds.add(ir::Bounds::None);
+                let bounds = self.bounds.add(Bounds::None);
                 params.push(bounds);
 
                 let Some(name) = param else {
@@ -93,37 +115,37 @@ impl Lowerer<'_> {
                     continue;
                 }
 
-                let ty = ir::Ty::Infer(bounds);
+                let ty = Ty::Infer(bounds);
                 generics.push(Generic { name, ty });
             }
 
             let name = def.name;
-            let alias = self.aliases.add(ir::Alias {
+            let alias = self.aliases.add(Alias {
                 name,
                 params,
-                ty: ir::Ty::unit(),
+                ty: Ty::UNIT,
             });
 
             self.scopes[scope].aliases.push(alias);
-            aliases.push((generics, alias, def));
+            aliases.push((scope, generics, alias, def));
         }
 
-        for (generics, alias, def) in aliases {
+        for (scope, generics, alias, def) in aliases {
             let ty = self.ty(scope, &mut Generics::Static(&generics), &def.ty);
             self.aliases[alias].ty = ty;
         }
     }
 
-    fn let_lambda_def(&mut self, scope: Id<ir::Scope>, def: &ast::LetDef) -> ir::Expr {
+    fn let_lambda_def(&mut self, scope: Id<Scope>, def: &ast::LetDef) -> Expr {
         self.lambda_def(scope, &def.params, &def.expr)
     }
 
     pub(super) fn lambda_def(
         &mut self,
-        mut scope: Id<ir::Scope>,
+        mut scope: Id<Scope>,
         params: &[ast::Pat],
         expr: &ast::Expr,
-    ) -> ir::Expr {
+    ) -> Expr {
         // this function works by going through each parameter in the forward direction, creating a
         // new scope and lowering the pattern, then going back through the parameters in the reverse
         // direction, creating lambdas and wrapping the inner expression
@@ -131,8 +153,8 @@ impl Lowerer<'_> {
         let lambdas = params
             .iter()
             .map(|pat| {
-                scope = self.add_scope(ir::ScopeKind::Lambda, scope);
-                let pat = self.pat(scope, ir::VarKind::Local, pat);
+                scope = self.add_scope(ScopeKind::Lambda, scope);
+                let pat = self.pat(scope, VarKind::Local, pat);
                 (scope, pat)
             })
             .collect::<Vec<_>>();
@@ -140,10 +162,10 @@ impl Lowerer<'_> {
         let expr = self.expr(scope, expr);
 
         lambdas.into_iter().rfold(expr, |expr, (scope, input)| {
-            let ty = ir::Ty::lambda(input.ty(), expr.ty());
+            let ty = Ty::lambda(input.ty(), expr.ty());
             let expr = Box::new(expr);
 
-            ir::Expr::Lambda(ir::LambdaExpr {
+            Expr::Lambda(LambdaExpr {
                 scope,
                 input,
                 expr,

@@ -1,5 +1,6 @@
-type list 'a = :none | :some ('a, list 'a)
-type bool = :true | :false
+import "std:option.ka"
+
+type list 'a = option ('a, list 'a)
 
 is list 'a
 let empty = :none
@@ -33,3 +34,28 @@ let fold acc f xs =
     :some (x, xs) ->
       let acc = f acc x
       fold acc f xs
+
+is ('a -> 'a -> 'a) -> list 'a -> option 'a
+let reduce f xs =
+  xs |> fold (:none) \acc x.
+    match acc
+      :none -> :some x
+      :some x' -> :some f x x'
+
+is list 'a -> nat
+let count xs = xs |> fold 0 \c _. c + 1
+
+is nat -> list 'a -> list 'a
+let skip n xs =
+  match xs
+    :none -> :none
+    :some (x, xs') ->
+      match n > 0
+        :false -> xs
+        :true -> skip (n - 1) xs'
+
+is nat -> list 'a -> option 'a
+let nth n xs =
+  match skip n xs
+   :some (x, _) -> :some x
+   :none -> :none

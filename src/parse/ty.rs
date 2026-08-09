@@ -23,7 +23,10 @@ pub fn is_ty(token: Token) -> bool {
 }
 
 pub fn ty(parser: &mut Parser) -> Ty {
-    tuple(parser)
+    match parser.peek() {
+        Token::Newline => block_union(parser),
+        _ => tuple(parser),
+    }
 }
 
 fn tuple(parser: &mut Parser) -> Ty {
@@ -67,11 +70,33 @@ fn union(parser: &mut Parser) -> Ty {
     Ty::Union(UnionTy { variants })
 }
 
+fn block_union(parser: &mut Parser) -> Ty {
+    parser.take_all(Token::Newline);
+    parser.expect(Token::Indent);
+    parser.take_all(Token::Newline);
+
+    let mut variants = Vec::new();
+
+    while !parser.is(Token::Dedent) && !parser.is(Token::Eof) {
+        parser.expect(Token::Pipe);
+
+        let variant = variant(parser);
+        variants.push(variant);
+
+        parser.take_all(Token::Newline);
+    }
+
+    parser.expect(Token::Dedent);
+
+    Ty::Union(UnionTy { variants })
+}
+
 fn variants(parser: &mut Parser) -> Vec<Variant> {
     let mut variants = Vec::new();
 
     while parser.is(Token::Colon) {
-        variants.push(variant(parser));
+        let variant = variant(parser);
+        variants.push(variant);
 
         if !parser.take(Token::Pipe) {
             break;

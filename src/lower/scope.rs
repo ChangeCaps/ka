@@ -1,34 +1,31 @@
-use crate::{arena::Id, ir, lower::Lowerer};
+use crate::{
+    arena::Id,
+    ir::{Alias, Global, Scope, ScopeKind, Var, VarKind},
+    lower::Lowerer,
+};
 
 impl Lowerer<'_> {
     pub(super) fn add_scope(
         &mut self,
-        kind: ir::ScopeKind,
-        parent: impl Into<Option<Id<ir::Scope>>>,
-    ) -> Id<ir::Scope> {
-        self.scopes.add(ir::Scope {
-            kind,
-            parent: parent.into(),
-            imports: Vec::new(),
-            aliases: Vec::new(),
-            vars: Vec::new(),
-            caps: Vec::new(),
-        })
+        kind: ScopeKind,
+        parent: impl Into<Option<Id<Scope>>>,
+    ) -> Id<Scope> {
+        self.scopes.add(Scope::new(kind, parent.into()))
     }
 
     pub(super) fn resolve_var(
         &mut self,
-        scope: Id<ir::Scope>,
+        scope: Id<Scope>,
         import: Option<&str>,
         name: &str,
-    ) -> Option<Id<ir::Var>> {
+    ) -> Option<Id<Var>> {
         match import {
             Some(import) => self.find_var_in_import(scope, import, name),
             None => self.find_or_capture_var(scope, name),
         }
     }
 
-    fn find_import(&self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Scope>> {
+    fn find_import(&self, scope: Id<Scope>, name: &str) -> Option<Id<Scope>> {
         self.scopes[scope]
             .imports
             .iter()
@@ -38,28 +35,23 @@ impl Lowerer<'_> {
             .or_else(|| self.find_import_in_parent(scope, name))
     }
 
-    fn find_import_in_parent(&self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Scope>> {
+    fn find_import_in_parent(&self, scope: Id<Scope>, name: &str) -> Option<Id<Scope>> {
         let parent = self.scopes[scope].parent?;
         self.find_import(parent, name)
     }
 
-    fn find_var_in_import(
-        &self,
-        scope: Id<ir::Scope>,
-        import: &str,
-        name: &str,
-    ) -> Option<Id<ir::Var>> {
+    fn find_var_in_import(&self, scope: Id<Scope>, import: &str, name: &str) -> Option<Id<Var>> {
         self.find_import(scope, import)
             .and_then(|scope| self.find_var(scope, name))
     }
 
-    fn find_or_capture_var(&mut self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Var>> {
+    fn find_or_capture_var(&mut self, scope: Id<Scope>, name: &str) -> Option<Id<Var>> {
         self.find_var(scope, name)
             .or_else(|| self.import_var(scope, name))
             .or_else(|| self.capture_var(scope, name))
     }
 
-    pub(super) fn find_var(&self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Var>> {
+    pub(super) fn find_var(&self, scope: Id<Scope>, name: &str) -> Option<Id<Var>> {
         self.scopes[scope]
             .vars
             .iter()
@@ -68,18 +60,18 @@ impl Lowerer<'_> {
             .find(|id| self.vars[*id].name == name)
     }
 
-    fn capture_var(&mut self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Var>> {
+    fn capture_var(&mut self, scope: Id<Scope>, name: &str) -> Option<Id<Var>> {
         let parent = self.scopes[scope].parent?;
 
         self.find_or_capture_var(parent, name).inspect(|&id| {
-            if self.vars[id].kind == ir::VarKind::Local {
+            if self.vars[id].kind == VarKind::Local {
                 self.scopes[scope].vars.push(id);
-                self.scopes[scope].caps.push(id);
+                self.scopes[scope].captures.push(id);
             }
         })
     }
 
-    fn import_var(&mut self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Var>> {
+    fn import_var(&mut self, scope: Id<Scope>, name: &str) -> Option<Id<Var>> {
         self.scopes[scope]
             .imports
             .iter()
@@ -90,10 +82,10 @@ impl Lowerer<'_> {
 
     pub(super) fn resolve_alias(
         &self,
-        scope: Id<ir::Scope>,
+        scope: Id<Scope>,
         import: Option<&str>,
         name: &str,
-    ) -> Option<Id<ir::Alias>> {
+    ) -> Option<Id<Alias>> {
         match import {
             Some(import) => self
                 .find_import(scope, import)
@@ -103,13 +95,13 @@ impl Lowerer<'_> {
         }
     }
 
-    fn find_or_import_alias(&self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Alias>> {
+    fn find_or_import_alias(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
         self.find_alias(scope, name)
             .or_else(|| self.find_imported_alias(scope, name))
             .or_else(|| self.find_alias_in_parent(scope, name))
     }
 
-    fn find_alias(&self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Alias>> {
+    fn find_alias(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
         self.scopes[scope]
             .aliases
             .iter()
@@ -117,12 +109,12 @@ impl Lowerer<'_> {
             .find(|id| self.aliases[*id].name == name)
     }
 
-    fn find_alias_in_parent(&self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Alias>> {
+    fn find_alias_in_parent(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
         let parent = self.scopes[scope].parent?;
         self.find_alias(parent, name)
     }
 
-    fn find_imported_alias(&self, scope: Id<ir::Scope>, name: &str) -> Option<Id<ir::Alias>> {
+    fn find_imported_alias(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
         self.scopes[scope]
             .imports
             .iter()
@@ -130,8 +122,8 @@ impl Lowerer<'_> {
             .find_map(|import| self.find_alias(import.scope, name))
     }
 
-    pub(super) fn current_global(&self, scope: Id<ir::Scope>) -> Id<ir::Global> {
-        if let ir::ScopeKind::Global(global) = self.scopes[scope].kind {
+    pub(super) fn current_global(&self, scope: Id<Scope>) -> Id<Global> {
+        if let ScopeKind::Global(global) = self.scopes[scope].kind {
             return global;
         }
 

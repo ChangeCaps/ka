@@ -1,8 +1,8 @@
 import "std:string.ka"
 
-extern "builtin::io::readln" readln is !str
+extern "io::readln" readln is !str
 
-extern "builtin::io::print" print is str -> !{}
+extern "io::print" print is str -> !{}
 
 is str -> !{}
 let println s = s |> append "\n" |> print

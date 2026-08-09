@@ -20,6 +20,45 @@ where
         Self { writer, files }
     }
 
+    pub fn write_report<'b>(
+        &mut self,
+        diagnostics: impl IntoIterator<Item = &'b Diagnostic>,
+    ) -> io::Result<()> {
+        let mut errors = 0;
+        let mut warnings = 0;
+
+        for diagnostic in diagnostics {
+            match diagnostic.severity() {
+                Severity::Error => errors += 1,
+                Severity::Warning => warnings += 1,
+            }
+
+            self.write(diagnostic)?
+        }
+
+        if errors > 0 {
+            writeln!(
+                self.writer,
+                "{}{} could to compile program due to {} previous error{}",
+                "error".red().bold(),
+                ":".bold(),
+                errors,
+                if errors > 1 { "s" } else { "" },
+            )?;
+        } else if warnings > 0 {
+            writeln!(
+                self.writer,
+                "{}{} compiled program with {} warning{}",
+                "warning".yellow().bold(),
+                ":".bold(),
+                warnings,
+                if warnings > 1 { "s" } else { "" },
+            )?;
+        }
+
+        Ok(())
+    }
+
     pub fn write(&mut self, diagnostic: &Diagnostic) -> io::Result<()> {
         let color = match diagnostic.severity() {
             Severity::Error => AnsiColors::Red,

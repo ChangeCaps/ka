@@ -1,0 +1,21 @@
+type option 'a =
+  | :some 'a
+  | :none
+
+is ('a -> 'b) -> option 'a -> option 'b
+let map-some f x =
+  match x
+    :some x -> :some f x
+    :none -> :none
+
+is ('a -> option 'b) -> option 'a -> option 'b
+let and-then f x =
+  match x
+    :some x -> f x
+    :none -> :none
+
+is 'a -> option 'a -> 'a
+let some-or otherwise x =
+  match x
+    :some x -> x
+    _ -> otherwise

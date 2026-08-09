@@ -2,10 +2,8 @@ use crate::arena::Id;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
-    Nat,
-    Int,
-    Num,
     Str,
+    Numeric(Numeric),
     Tuple(Vec<Ty>),
     Record(RecordTy),
     Lambda(LambdaTy),
@@ -13,11 +11,46 @@ pub enum Ty {
     Alias(AliasTy),
     Monad(Box<Ty>),
     Infer(Id<Bounds>),
+    Generic(GenericTy),
 }
 
 impl Ty {
-    pub const fn unit() -> Self {
-        Self::Record(RecordTy { fields: Vec::new() })
+    pub const UNIT: Self = Self::Record(RecordTy { fields: Vec::new() });
+
+    pub const NAT: Self = Self::Numeric(Numeric::Nat);
+
+    pub const INT: Self = Self::Numeric(Numeric::Int);
+
+    pub const NUM: Self = Self::Numeric(Numeric::Num);
+
+    pub fn option(inner: Self) -> Self {
+        Self::Union(UnionTy {
+            variants: vec![
+                Variant {
+                    name: "some",
+                    payload: Some(inner),
+                },
+                Variant {
+                    name: "none",
+                    payload: None,
+                },
+            ],
+        })
+    }
+
+    pub fn bool() -> Self {
+        Self::Union(UnionTy {
+            variants: vec![
+                Variant {
+                    name: "true",
+                    payload: None,
+                },
+                Variant {
+                    name: "false",
+                    payload: None,
+                },
+            ],
+        })
     }
 
     pub fn lambda(input: Self, output: Self) -> Self {
@@ -27,19 +60,25 @@ impl Ty {
         })
     }
 
-    pub fn bool() -> Self {
-        Self::Union(UnionTy {
-            variants: vec![
-                Variant {
-                    name: "true",
-                    ty: None,
-                },
-                Variant {
-                    name: "false",
-                    ty: None,
-                },
-            ],
-        })
+    pub fn monad(result: Self) -> Self {
+        Self::Monad(Box::new(result))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Numeric {
+    Nat,
+    Int,
+    Num,
+}
+
+impl Numeric {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Numeric::Nat => "nat",
+            Numeric::Int => "int",
+            Numeric::Num => "num",
+        }
     }
 }
 
@@ -66,9 +105,15 @@ pub struct UnionTy {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GenericTy {
+    pub name: &'static str,
+    pub bounds: Id<Bounds>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Variant {
     pub name: &'static str,
-    pub ty: Option<Ty>,
+    pub payload: Option<Ty>,
 }
 
 impl UnionTy {
@@ -76,7 +121,7 @@ impl UnionTy {
         self.variants
             .iter()
             .find(|variant| variant.name == name)
-            .map(|variant| variant.ty.as_ref())
+            .map(|variant| variant.payload.as_ref())
     }
 }
 
@@ -95,7 +140,20 @@ pub struct Alias {
 
 #[derive(Clone, Debug)]
 pub enum Bounds {
+    Numeric(Numeric),
     Record(RecordTy),
     Union(UnionTy),
     None,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_ordering() {
+        assert!(Numeric::Int > Numeric::Nat);
+        assert!(Numeric::Num > Numeric::Nat);
+        assert!(Numeric::Num > Numeric::Int);
+    }
 }

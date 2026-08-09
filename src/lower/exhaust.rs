@@ -1,14 +1,18 @@
 use std::{collections::HashMap, iter};
 
-use crate::{diagnostic::Span, ir, lower::Lowerer};
+use crate::{
+    diagnostic::Span,
+    ir::{Pat, Ty, UnionTy, Variant},
+    lower::Lowerer,
+};
 
 impl Lowerer<'_> {
     pub(super) fn match_input_type<'a>(
         &mut self,
         column: &Column,
-        pats: impl Iterator<Item = &'a ir::Pat>,
+        pats: impl Iterator<Item = &'a Pat>,
         span: Span,
-    ) -> ir::Ty {
+    ) -> Ty {
         let ty = self.add_inferred_type();
 
         match column {
@@ -22,7 +26,7 @@ impl Lowerer<'_> {
                 let mut fields = vec![Vec::new(); columns.len()];
 
                 for pat in pats {
-                    if let ir::Pat::Tuple(pats) = pat {
+                    if let Pat::Tuple(pats) = pat {
                         for (field, pat) in fields.iter_mut().zip(&pats.fields) {
                             field.push(pat);
                         }
@@ -37,15 +41,15 @@ impl Lowerer<'_> {
                     .map(|(pats, column)| self.match_input_type(column, pats.into_iter(), span))
                     .collect::<Vec<_>>();
 
-                let tuple = ir::Ty::Tuple(fields);
+                let tuple = Ty::Tuple(fields);
                 self.unify(&ty, &tuple, span);
             }
 
-            Column::Union(variants, is_open) => {
-                let mut variant_pats: HashMap<&str, Vec<&ir::Pat>> = HashMap::new();
+            Column::Union(union) => {
+                let mut variant_pats: HashMap<&str, Vec<&Pat>> = HashMap::new();
 
                 for pat in pats {
-                    if let ir::Pat::Variant(pat) = pat {
+                    if let Pat::Variant(pat) = pat {
                         let pats = variant_pats.entry(pat.name).or_default();
 
                         if let Some(ref pat) = pat.pat {
@@ -56,7 +60,8 @@ impl Lowerer<'_> {
                     }
                 }
 
-                let variants = variants
+                let variants = union
+                    .variants
                     .iter()
                     .map(|variant| {
                         let payload = variant.payload.as_ref().map(|column| {
@@ -67,19 +72,19 @@ impl Lowerer<'_> {
                             )
                         });
 
-                        ir::Variant {
+                        Variant {
                             name: variant.name,
-                            ty: payload,
+                            payload,
                         }
                     })
                     .collect::<Vec<_>>();
 
-                if *is_open {
+                if union.is_open {
                     for variant in variants {
-                        self.constrain_variant(&ty, variant.name, variant.ty.as_ref(), span);
+                        self.constrain_variant(&ty, variant.name, variant.payload.as_ref(), span);
                     }
                 } else {
-                    let union = ir::Ty::Union(ir::UnionTy { variants });
+                    let union = Ty::Union(UnionTy { variants });
                     self.unify(&ty, &union, span);
                 }
             }
@@ -108,7 +113,7 @@ impl Matrix {
         Self { rows }
     }
 
-    pub fn specialize(&self, kind: ConsKind) -> Self {
+    pub fn specialize(&self, kind: ConstructorKind) -> Self {
         let rows = self
             .rows
             .iter()
@@ -136,7 +141,7 @@ impl Matrix {
     pub fn is_wild(&self) -> bool {
         self.rows
             .iter()
-            .any(|row| row.first().is_some_and(Pat::is_wild))
+            .any(|row| row.first().is_some_and(Pattern::is_wild))
     }
 
     pub(super) fn open_column(&self, column: Column) -> Column {
@@ -160,15 +165,18 @@ impl Matrix {
                     let mut stack = matrix.open_column_recurse(&columns);
 
                     let column = match kind {
-                        ConsKind::Tuple(count) => {
+                        ConstructorKind::Tuple(count) => {
                             let fields = stack.drain(stack.len() - count..).rev();
                             Column::Tuple(fields.collect())
                         }
 
-                        ConsKind::Variant(name, payload) => {
+                        ConstructorKind::Variant(name, payload) => {
                             let payload = payload.then(|| stack.pop().unwrap());
-                            let open = self.is_wild();
-                            Column::Union(vec![Variant { name, payload }], open)
+
+                            Column::Union(ColumnUnion {
+                                variants: vec![ColumnVariant { name, payload }],
+                                is_open: self.is_wild(),
+                            })
                         }
                     };
 
@@ -202,11 +210,11 @@ impl Matrix {
 
     fn is_useful_recurse(&self, columns: &Columns, row: &Row) -> bool {
         let Some(pat) = row.first() else {
-            return self.rows.iter().all(|row| !row.pats.is_empty());
+            return self.rows.iter().all(|row| !row.patterns.is_empty());
         };
 
         match pat {
-            Pat::Cons(cons) => {
+            Pattern::Cons(cons) => {
                 let matrix = self.specialize(cons.kind);
                 let row = row.specialize(cons.kind).unwrap();
                 let columns = columns.specialize(cons.kind);
@@ -214,7 +222,7 @@ impl Matrix {
                 matrix.is_useful_recurse(&columns, &row)
             }
 
-            Pat::Wild => {
+            Pattern::Wild => {
                 let column = columns.first().unwrap();
 
                 match column.constructors() {
@@ -238,7 +246,7 @@ impl Matrix {
         }
     }
 
-    pub(super) fn unexhausted_pats(&self, column: &Column) -> Vec<Pat> {
+    pub(super) fn unexhausted_pats(&self, column: &Column) -> Vec<Pattern> {
         let columns = Columns::new(column.clone());
 
         self.unexhausted_pats_recurse(&columns)
@@ -247,9 +255,9 @@ impl Matrix {
             .collect()
     }
 
-    fn unexhausted_pats_recurse(&self, columns: &Columns) -> Vec<Vec<Pat>> {
+    fn unexhausted_pats_recurse(&self, columns: &Columns) -> Vec<Vec<Pattern>> {
         let Some(column) = columns.first() else {
-            return if self.rows.iter().all(|row| !row.pats.is_empty()) {
+            return if self.rows.iter().all(|row| !row.patterns.is_empty()) {
                 vec![Vec::new()]
             } else {
                 Vec::new()
@@ -265,7 +273,7 @@ impl Matrix {
                     .unexhausted_pats_recurse(&columns)
                     .into_iter()
                     .map(|mut stack| {
-                        stack.push(Pat::Wild);
+                        stack.push(Pattern::Wild);
                         stack
                     })
                     .collect()
@@ -282,7 +290,7 @@ impl Matrix {
                         .into_iter()
                         .map(move |mut stack| {
                             let fields = stack.drain(stack.len() - kind.arity()..).rev().collect();
-                            stack.push(Pat::Cons(Cons { kind, fields }));
+                            stack.push(Pattern::Cons(Constructor { kind, fields }));
                             stack
                         })
                 })
@@ -293,38 +301,43 @@ impl Matrix {
 
 #[derive(Clone, Debug)]
 pub(super) struct Row {
-    pats: Vec<Pat>,
+    patterns: Vec<Pattern>,
 }
 
 impl Row {
-    pub(super) fn new(pat: Pat) -> Self {
-        Self { pats: vec![pat] }
+    pub(super) fn new(pat: Pattern) -> Self {
+        Self {
+            patterns: vec![pat],
+        }
     }
 
-    fn first(&self) -> Option<&Pat> {
-        self.pats.last()
+    fn first(&self) -> Option<&Pattern> {
+        self.patterns.last()
     }
 
     fn tail(&self) -> Option<Self> {
-        let (_, tail) = self.pats.split_last()?;
-        Some(Self { pats: tail.into() })
+        let (_, tail) = self.patterns.split_last()?;
+        Some(Self {
+            patterns: tail.into(),
+        })
     }
 
-    fn specialize(&self, kind: ConsKind) -> Option<Self> {
+    fn specialize(&self, kind: ConstructorKind) -> Option<Self> {
         let mut row = self.clone();
 
         match self.first()? {
-            Pat::Wild => {
-                row.pats.pop();
-                row.pats.extend(iter::repeat_n(Pat::Wild, kind.arity()));
+            Pattern::Wild => {
+                row.patterns.pop();
+                row.patterns
+                    .extend(iter::repeat_n(Pattern::Wild, kind.arity()));
             }
 
-            Pat::Cons(cons) if cons.kind == kind => {
-                row.pats.pop();
-                row.pats.extend(cons.fields.iter().rev().cloned());
+            Pattern::Cons(cons) if cons.kind == kind => {
+                row.patterns.pop();
+                row.patterns.extend(cons.fields.iter().rev().cloned());
             }
 
-            Pat::Cons(..) => return None,
+            Pattern::Cons(..) => return None,
         }
 
         Some(row)
@@ -332,35 +345,35 @@ impl Row {
 }
 
 #[derive(Clone, Debug)]
-pub(super) enum Pat {
+pub(super) enum Pattern {
     Wild,
-    Cons(Cons),
+    Cons(Constructor),
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Cons {
-    kind: ConsKind,
-    fields: Vec<Pat>,
+pub(super) struct Constructor {
+    kind: ConstructorKind,
+    fields: Vec<Pattern>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(super) enum ConsKind {
+pub(super) enum ConstructorKind {
     Tuple(usize),
     Variant(&'static str, bool),
 }
 
-impl Pat {
-    pub(super) fn new(pat: &ir::Pat) -> Self {
+impl Pattern {
+    pub(super) fn new(pat: &Pat) -> Self {
         match pat {
-            ir::Pat::Wild(..) | ir::Pat::Bind(..) | ir::Pat::Error(..) => Self::Wild,
+            Pat::Wild(..) | Pat::Bind(..) | Pat::Error(..) => Self::Wild,
 
-            ir::Pat::Variant(pat) => Self::Cons(Cons {
-                kind: ConsKind::Variant(pat.name, pat.pat.is_some()),
+            Pat::Variant(pat) => Self::Cons(Constructor {
+                kind: ConstructorKind::Variant(pat.name, pat.pat.is_some()),
                 fields: pat.pat.as_deref().map(Self::new).into_iter().collect(),
             }),
 
-            ir::Pat::Tuple(pat) => Self::Cons(Cons {
-                kind: ConsKind::Tuple(pat.fields.len()),
+            Pat::Tuple(pat) => Self::Cons(Constructor {
+                kind: ConstructorKind::Tuple(pat.fields.len()),
                 fields: pat.fields.iter().map(Self::new).collect(),
             }),
         }
@@ -376,9 +389,9 @@ impl Pat {
 
     fn format_recurse(&self, precedence: u8) -> String {
         match self {
-            Pat::Wild => String::from("_"),
-            Pat::Cons(cons) => match cons.kind {
-                ConsKind::Tuple(_) => {
+            Pattern::Wild => String::from("_"),
+            Pattern::Cons(cons) => match cons.kind {
+                ConstructorKind::Tuple(_) => {
                     let f = cons
                         .fields
                         .iter()
@@ -389,7 +402,7 @@ impl Pat {
                     if precedence > 0 { format!("({f})") } else { f }
                 }
 
-                ConsKind::Variant(name, _) => {
+                ConstructorKind::Variant(name, _) => {
                     let mut f = format!(":{name}");
 
                     if let Some(payload) = cons.fields.first() {
@@ -403,11 +416,11 @@ impl Pat {
     }
 }
 
-impl ConsKind {
+impl ConstructorKind {
     fn arity(&self) -> usize {
         match self {
-            ConsKind::Tuple(arity) => *arity,
-            ConsKind::Variant(_, payload) => *payload as usize,
+            ConstructorKind::Tuple(arity) => *arity,
+            ConstructorKind::Variant(_, payload) => *payload as usize,
         }
     }
 }
@@ -436,7 +449,7 @@ impl Columns {
         })
     }
 
-    fn specialize(&self, kind: ConsKind) -> Self {
+    fn specialize(&self, kind: ConstructorKind) -> Self {
         let first = self.first().unwrap();
 
         let mut columns = self.clone();
@@ -453,13 +466,14 @@ impl Columns {
                 columns.columns.extend(fields.iter().rev().cloned());
             }
 
-            Column::Union(variants, ..) => {
-                let ConsKind::Variant(name, ..) = kind else {
+            Column::Union(union) => {
+                let ConstructorKind::Variant(name, ..) = kind else {
                     panic!();
                 };
 
                 if !name.is_empty() {
-                    let variant = variants
+                    let variant = union
+                        .variants
                         .iter()
                         .find(|variant| variant.name == name)
                         .unwrap();
@@ -479,33 +493,42 @@ impl Columns {
 pub(super) enum Column {
     Wild,
     Tuple(Vec<Column>),
-    Union(Vec<Variant>, bool),
+    Union(ColumnUnion),
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Variant {
+pub(super) struct ColumnUnion {
+    variants: Vec<ColumnVariant>,
+    is_open: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ColumnVariant {
     name: &'static str,
     payload: Option<Column>,
 }
 
 impl Column {
-    pub(super) fn from_pat(pat: &Pat) -> Self {
+    pub(super) fn from_pat(pat: &Pattern) -> Self {
         match pat {
-            Pat::Wild => Self::Wild,
-            Pat::Cons(cons) => Self::from_cons(cons),
+            Pattern::Wild => Self::Wild,
+            Pattern::Cons(cons) => Self::from_cons(cons),
         }
     }
 
-    fn from_cons(cons: &Cons) -> Self {
+    fn from_cons(cons: &Constructor) -> Self {
         match cons.kind {
-            ConsKind::Tuple(_) => {
+            ConstructorKind::Tuple(_) => {
                 let fields = cons.fields.iter().map(Self::from_pat).collect();
                 Self::Tuple(fields)
             }
 
-            ConsKind::Variant(name, _) => {
+            ConstructorKind::Variant(name, _) => {
                 let payload = cons.fields.first().map(Self::from_pat);
-                Self::Union(vec![Variant { name, payload }], false)
+                Self::Union(ColumnUnion {
+                    variants: vec![ColumnVariant { name, payload }],
+                    is_open: false,
+                })
             }
         }
     }
@@ -530,10 +553,10 @@ impl Column {
                 Ok(Self::Tuple(fields))
             }
 
-            (Self::Union(variants, is_open), Self::Union(other_variants, other_is_open)) => {
-                let mut variants = variants.clone();
+            (Self::Union(this), Self::Union(other)) => {
+                let mut variants = this.variants.clone();
 
-                for other_variant in other_variants {
+                for other_variant in other.variants.iter() {
                     let Some(variant) = variants
                         .iter_mut()
                         .find(|variant| variant.name == other_variant.name)
@@ -553,21 +576,27 @@ impl Column {
                     }
                 }
 
-                Ok(Self::Union(variants, is_open & other_is_open))
+                Ok(Self::Union(ColumnUnion {
+                    variants,
+                    is_open: this.is_open & other.is_open,
+                }))
             }
 
             (_, _) => Err(()),
         }
     }
 
-    fn constructors(&self) -> Option<Vec<ConsKind>> {
+    fn constructors(&self) -> Option<Vec<ConstructorKind>> {
         match self {
-            Column::Wild | Column::Union(_, true) => None,
-            Column::Tuple(fields) => Some(vec![ConsKind::Tuple(fields.len())]),
-            Column::Union(variants, false) => {
-                let constructors = variants
+            Column::Wild | Column::Union(ColumnUnion { is_open: true, .. }) => None,
+            Column::Tuple(fields) => Some(vec![ConstructorKind::Tuple(fields.len())]),
+            Column::Union(union) => {
+                let constructors = union
+                    .variants
                     .iter()
-                    .map(|variant| ConsKind::Variant(variant.name, variant.payload.is_some()))
+                    .map(|variant| {
+                        ConstructorKind::Variant(variant.name, variant.payload.is_some())
+                    })
                     .collect();
 
                 Some(constructors)

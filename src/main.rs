@@ -13,10 +13,10 @@ use ka::{
 fn main() -> io::Result<()> {
     let mut compiler = Compiler::new();
 
-    compiler.add_package("test")?;
-    compiler.add_package("std")?;
+    compiler.add_package("test", "test")?;
+    compiler.add_package("std", "std")?;
 
-    compiler.run();
+    compiler.run("test");
 
     Ok(())
 }
@@ -43,56 +43,60 @@ impl Compiler {
         }
     }
 
-    fn run(mut self) {
+    fn run(mut self, main_package: &str) {
+        let main_module = format!("{main_package}:main.ka");
+
+        if !self.modules.iter().any(|module| module.name == main_module) {
+            panic!("main module not found");
+        }
+
         let mut lowerer = Lowerer::new(&mut self.emitter);
 
         for module in self.modules {
             lowerer.add_module(module.name, module.ast);
         }
 
-        let program = lowerer.finish();
+        let (program, main) = lowerer.finish(&main_module);
 
         let mut writer = ka::diagnostic::Writer::new(io::stderr(), &self.files);
-
-        for diagnostic in &self.emitter {
-            let _ = writer.write(diagnostic);
-        }
+        writer.write_report(&self.emitter).unwrap();
 
         if self.emitter.iter().any(|d| d.severity() == Severity::Error) {
             return;
         }
 
-        let mut runtime = Runtime::new(&program);
-        runtime.run();
+        if let Some(main) = main {
+            let mut runtime = Runtime::new(&program);
+            runtime.run(main);
+        }
     }
 
-    fn add_package(&mut self, path: impl AsRef<Path>) -> io::Result<()> {
-        let path = fs::canonicalize(path)?;
-        let name = path
-            .file_name()
-            .and_then(ffi::OsStr::to_str)
-            .ok_or_else(|| io::Error::other("invalid package root"))?;
-
+    fn add_package(&mut self, name: &str, path: impl AsRef<Path>) -> io::Result<()> {
         let name = format!("{name}:");
-
+        let path = fs::canonicalize(path)?;
         self.add_package_dir(&name, &path)
+    }
+
+    fn add_package_path(&mut self, parent: &str, path: &Path) -> io::Result<()> {
+        if path.is_file() {
+            return self.add_package_file(parent, path);
+        }
+
+        if let Some(name) = path.file_name().and_then(ffi::OsStr::to_str)
+            && path.is_dir()
+        {
+            let name = format!("{parent}{name}/");
+            self.add_package_dir(&name, path)
+        } else {
+            Ok(())
+        }
     }
 
     fn add_package_dir(&mut self, parent: &str, path: &Path) -> io::Result<()> {
         for entry in path.read_dir()? {
             let entry = entry?;
             let path = entry.path();
-
-            if path.is_dir() {
-                let name = path.file_name().and_then(ffi::OsStr::to_str);
-
-                if let Some(name) = name {
-                    let name = format!("{parent}{name}/");
-                    self.add_package_dir(&name, &path)?;
-                }
-            } else {
-                self.add_package_file(parent, &path)?;
-            }
+            self.add_package_path(parent, &path)?;
         }
 
         Ok(())

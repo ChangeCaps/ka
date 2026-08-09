@@ -329,6 +329,7 @@ impl<'a> Lexer<'a> {
             "match" => Token::Match,
             "nat" => Token::Nat,
             "num" => Token::Num,
+            "rec" => Token::Rec,
             "str" => Token::Str,
             "type" => Token::Type,
             "_" => Token::Under,

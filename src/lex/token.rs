@@ -25,6 +25,7 @@ pub enum Token {
     Match,
     Nat,
     Num,
+    Rec,
     Str,
     Type,
 
@@ -90,6 +91,7 @@ impl fmt::Display for Token {
             Self::Match => write!(f, "match"),
             Self::Nat => write!(f, "nat"),
             Self::Num => write!(f, "num"),
+            Self::Rec => write!(f, "rec"),
             Self::Str => write!(f, "str"),
             Self::Type => write!(f, "type"),
 

@@ -24,6 +24,19 @@ pub struct Scope {
     pub parent: Option<Id<Scope>>,
     pub imports: Vec<Import>,
     pub aliases: Vec<Id<Alias>>,
+    pub captures: Vec<Id<Var>>,
     pub vars: Vec<Id<Var>>,
-    pub caps: Vec<Id<Var>>,
+}
+
+impl Scope {
+    pub fn new(kind: ScopeKind, parent: Option<Id<Scope>>) -> Self {
+        Self {
+            kind,
+            parent,
+            imports: Vec::new(),
+            aliases: Vec::new(),
+            captures: Vec::new(),
+            vars: Vec::new(),
+        }
+    }
 }

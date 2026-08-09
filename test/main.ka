@@ -1,7 +1,8 @@
 import "std:list.ka"
 import "std:io.ka"
+import "std:env.ka"
+import "std:string.ka"
+import "std:monad.ka"
 
-is !{}
 let main =
-  empty
-    |> debug
+  args |> bind debug

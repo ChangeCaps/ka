@@ -1,5 +1,6 @@
 use crate::{
     arena::Id,
+    diagnostic::Span,
     ir::{Extern, Global, Ty},
 };
 
@@ -15,4 +16,5 @@ pub struct Var {
     pub kind: VarKind,
     pub name: &'static str,
     pub ty: Ty,
+    pub span: Span,
 }

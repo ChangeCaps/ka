@@ -1,119 +1,169 @@
 use std::{
     collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
-    iter,
 };
 
 use crate::{
     arena::Id,
     diagnostic::{Diagnostic, Span},
-    ir,
+    ir::{AliasTy, Bounds, GenericTy, Numeric, RecordTy, Ty, UnionTy, Variant},
     lower::Lowerer,
 };
 
 impl Lowerer<'_> {
-    pub(super) fn add_inferred_type(&mut self) -> ir::Ty {
-        let id = self.bounds.add(ir::Bounds::None);
-        ir::Ty::Infer(id)
+    pub(super) fn add_inferred_type(&mut self) -> Ty {
+        let id = self.bounds.add(Bounds::None);
+        Ty::Infer(id)
+    }
+
+    pub(super) fn constrain_numeric(&mut self, target: &Ty, bound: Numeric, span: Span) {
+        if self.try_constrain_numeric(target, bound).is_err() {
+            let diagnostic = Diagnostic::error(format!(
+                "`{}` is not `{}`",
+                self.format_ty(target),
+                bound.as_str(),
+            ))
+            .with_label(span, "required here");
+
+            self.emitter.emit(diagnostic);
+        }
+    }
+
+    pub(super) fn try_constrain_numeric(&mut self, target: &Ty, bound: Numeric) -> Result<(), ()> {
+        if let Some(target) = self.subst_shallow(target).cloned() {
+            return self.try_constrain_numeric(&target, bound);
+        }
+
+        if let &Ty::Infer(id) = target
+            && let Bounds::None = self.bounds[id]
+        {
+            self.bounds[id] = Bounds::Numeric(bound);
+            return Ok(());
+        }
+
+        if let &Ty::Infer(id) = target
+            && let Bounds::Numeric(ref mut target) = self.bounds[id]
+            && *target >= bound
+        {
+            *target = bound;
+            return Ok(());
+        }
+
+        if let Ty::Numeric(target) = target
+            && *target <= bound
+        {
+            return Ok(());
+        }
+
+        Err(())
     }
 
     pub(super) fn constrain_variant(
         &mut self,
-        target: &ir::Ty,
+        target: &Ty,
         name: &'static str,
-        ty: Option<&ir::Ty>,
+        ty: Option<&Ty>,
         span: Span,
     ) {
+        if self.try_constrain_variant(target, name, ty).is_err() {
+            let diagnostic = Diagnostic::error(format!(
+                "constrain::variant, `{}`, {}, {:?}",
+                self.format_ty(target),
+                name,
+                ty,
+            ))
+            .with_label(span, "here");
+
+            self.emitter.emit(diagnostic);
+        }
+    }
+
+    fn try_constrain_variant(
+        &mut self,
+        target: &Ty,
+        name: &'static str,
+        ty: Option<&Ty>,
+    ) -> Result<(), ()> {
         if let Some(target) = self.subst_shallow(target).cloned() {
-            return self.constrain_variant(&target, name, ty, span);
+            return self.try_constrain_variant(&target, name, ty);
         }
 
-        if let &ir::Ty::Infer(id) = target
-            && let ir::Bounds::None = self.bounds[id]
+        if let &Ty::Infer(id) = target
+            && let Bounds::None = self.bounds[id]
         {
-            self.bounds[id] = ir::Bounds::Union(ir::UnionTy {
-                variants: vec![ir::Variant {
+            self.bounds[id] = Bounds::Union(UnionTy {
+                variants: vec![Variant {
                     name,
-                    ty: ty.cloned(),
+                    payload: ty.cloned(),
                 }],
             });
+
+            return Ok(());
         }
 
-        if let &ir::Ty::Infer(id) = target
-            && let ir::Bounds::Union(ref target) = self.bounds[id]
+        if let &Ty::Infer(id) = target
+            && let Bounds::Union(ref target) = self.bounds[id]
             && let Some(target) = target.get(name)
         {
             match (target, ty) {
                 (Some(target), Some(ty)) => {
                     let target = target.clone();
-                    self.unify(&target, ty, span);
-                    return;
+                    self.try_unify(&target, ty)?;
+                    return Ok(());
                 }
 
                 (None, None) => {
-                    return;
+                    return Ok(());
                 }
 
                 _ => {}
             }
         }
 
-        if let &ir::Ty::Infer(id) = target
-            && let ir::Bounds::Union(ref mut target) = self.bounds[id]
+        if let &Ty::Infer(id) = target
+            && let Bounds::Union(ref mut target) = self.bounds[id]
             && target.get(name).is_none()
         {
             let ty = ty.cloned();
-            target.variants.push(ir::Variant { name, ty });
-            return;
+            target.variants.push(Variant { name, payload: ty });
+            return Ok(());
         }
 
-        if let ir::Ty::Union(target) = target
+        if let Ty::Union(target) = target
             && let Some(target) = target.get(name)
         {
             match (target, ty) {
                 (Some(target), Some(ty)) => {
-                    self.unify(target, ty, span);
-                    return;
+                    self.try_unify(target, ty)?;
+                    return Ok(());
                 }
 
                 (None, None) => {
-                    return;
+                    return Ok(());
                 }
 
                 _ => {}
             }
         }
 
-        if let ir::Ty::Alias(target) = target {
+        if let Ty::Alias(target) = target {
             let target = self.instantiate_alias(target);
-            self.constrain_variant(&target, name, ty, span);
-            return;
+            self.try_constrain_variant(&target, name, ty)?;
+            return Ok(());
         }
 
-        let diagnostic = Diagnostic::error(format!(
-            "constrain::variant, `{}`, {}, {:?}",
-            self.format_ty(target),
-            name,
-            ty,
-        ))
-        .with_label(span, "here");
-
-        self.emitter.emit(diagnostic);
+        Err(())
     }
 
-    pub(super) fn instantiate(&mut self, ty: ir::Ty) -> ir::Ty {
+    pub(super) fn instantiate(&mut self, ty: Ty) -> Ty {
         self.instantiate_with(ty, HashMap::new())
     }
 
-    pub(super) fn instantiate_with(
-        &mut self,
-        mut ty: ir::Ty,
-        mut map: HashMap<Id<ir::Bounds>, ir::Ty>,
-    ) -> ir::Ty {
+    pub(super) fn instantiate_with(&mut self, mut ty: Ty, mut map: HashMap<Id<Bounds>, Ty>) -> Ty {
         fn recurse_record(
             lowerer: &mut Lowerer<'_>,
-            ty: &mut ir::RecordTy,
-            map: &mut HashMap<Id<ir::Bounds>, ir::Ty>,
+            ty: &mut RecordTy,
+            map: &mut HashMap<Id<Bounds>, Ty>,
         ) {
             for field in &mut ty.fields {
                 recurse(lowerer, &mut field.ty, map);
@@ -122,66 +172,66 @@ impl Lowerer<'_> {
 
         fn recurse_union(
             lowerer: &mut Lowerer<'_>,
-            ty: &mut ir::UnionTy,
-            map: &mut HashMap<Id<ir::Bounds>, ir::Ty>,
+            ty: &mut UnionTy,
+            map: &mut HashMap<Id<Bounds>, Ty>,
         ) {
             for variant in &mut ty.variants {
-                if let Some(ref mut ty) = variant.ty {
+                if let Some(ref mut ty) = variant.payload {
                     recurse(lowerer, ty, map);
                 }
             }
         }
 
-        fn recurse(
-            lowerer: &mut Lowerer<'_>,
-            ty: &mut ir::Ty,
-            map: &mut HashMap<Id<ir::Bounds>, ir::Ty>,
-        ) {
+        fn recurse(lowerer: &mut Lowerer<'_>, ty: &mut Ty, map: &mut HashMap<Id<Bounds>, Ty>) {
             match ty {
-                ir::Ty::Infer(id) => {
-                    if let Some(subst) = lowerer.subst.get(id) {
-                        *ty = subst.clone();
-                    } else if let Some(new) = map.get(id).cloned() {
+                Ty::Infer(bounds) | Ty::Generic(GenericTy { bounds, .. }) => {
+                    if let Some(new) = map.get(bounds).cloned() {
                         *ty = new;
                     } else {
                         let new = lowerer.bounds.reserve();
-                        map.insert(*id, ir::Ty::Infer(new));
+                        map.insert(*bounds, Ty::Infer(new));
 
-                        let mut bounds = lowerer.bounds[*id].clone();
+                        if let Some(mut subst) = lowerer.subst.get(bounds).cloned() {
+                            recurse(lowerer, &mut subst, map);
+                            lowerer.subst.insert(new, subst);
+                        }
+
+                        let mut bounds = lowerer.bounds[*bounds].clone();
 
                         match bounds {
-                            ir::Bounds::Record(ref mut ty) => recurse_record(lowerer, ty, map),
-                            ir::Bounds::Union(ref mut ty) => recurse_union(lowerer, ty, map),
-                            ir::Bounds::None => {}
+                            Bounds::Numeric(..) => {}
+                            Bounds::Record(ref mut ty) => recurse_record(lowerer, ty, map),
+                            Bounds::Union(ref mut ty) => recurse_union(lowerer, ty, map),
+                            Bounds::None => {}
                         }
 
                         lowerer.bounds.insert(new, bounds);
-                        *id = new;
+                        *ty = Ty::Infer(new);
                     }
                 }
 
-                ir::Ty::Nat | ir::Ty::Int | ir::Ty::Num | ir::Ty::Str => {}
+                Ty::Numeric(..) | Ty::Str => {}
 
-                ir::Ty::Tuple(fields) => {
+                Ty::Tuple(fields) => {
                     for field in fields {
                         recurse(lowerer, field, map);
                     }
                 }
 
-                ir::Ty::Lambda(ty) => {
+                Ty::Lambda(ty) => {
                     recurse(lowerer, &mut ty.input, map);
                     recurse(lowerer, &mut ty.output, map);
                 }
 
-                ir::Ty::Alias(ty) => {
+                Ty::Alias(ty) => {
                     for arg in &mut ty.args {
                         recurse(lowerer, arg, map);
                     }
                 }
 
-                ir::Ty::Record(ty) => recurse_record(lowerer, ty, map),
-                ir::Ty::Union(ty) => recurse_union(lowerer, ty, map),
-                ir::Ty::Monad(ty) => recurse(lowerer, ty, map),
+                Ty::Record(ty) => recurse_record(lowerer, ty, map),
+                Ty::Union(ty) => recurse_union(lowerer, ty, map),
+                Ty::Monad(ty) => recurse(lowerer, ty, map),
             }
         }
 
@@ -190,259 +240,24 @@ impl Lowerer<'_> {
         ty
     }
 
-    pub(super) fn format_ty(&self, ty: &ir::Ty) -> String {
-        fn recurse_record(
-            lowerer: &Lowerer<'_>,
-            ty: &ir::RecordTy,
-            infos: &HashMap<Id<ir::Bounds>, InferTyInfo>,
-        ) -> String {
-            let fields = ty
-                .fields
-                .iter()
-                .map(|field| {
-                    let ty = recurse(lowerer, &field.ty, infos, 0);
-                    format!("{}: {}", field.name, ty)
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+    pub(super) fn unify(&mut self, lhs: &Ty, rhs: &Ty, span: Span) {
+        if self.try_unify(lhs, rhs).is_err() {
+            let diagnostic = Diagnostic::error(format!(
+                "expected type `{}` but found `{}`",
+                self.format_ty(lhs),
+                self.format_ty(rhs)
+            ))
+            .with_label(span, "required here");
 
-            if fields.is_empty() {
-                String::from("{}")
-            } else {
-                format!("{{ {fields} }}")
-            }
-        }
-
-        fn recurse_union(
-            lowerer: &Lowerer<'_>,
-            ty: &ir::UnionTy,
-            infos: &HashMap<Id<ir::Bounds>, InferTyInfo>,
-        ) -> String {
-            ty.variants
-                .iter()
-                .map(|variant| {
-                    let f = format!(":{}", variant.name);
-
-                    match variant.ty {
-                        Some(ref ty) => {
-                            let ty = recurse(lowerer, ty, infos, 4);
-
-                            format!("{f} {ty}")
-                        }
-
-                        None => f,
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" | ")
-        }
-
-        fn recurse(
-            lowerer: &Lowerer<'_>,
-            ty: &ir::Ty,
-            infos: &HashMap<Id<ir::Bounds>, InferTyInfo>,
-            precedence: u8,
-        ) -> String {
-            match ty {
-                ir::Ty::Infer(id) => {
-                    if let Some(info) = infos.get(id) {
-                        format!("'{}", info.name)
-                    } else {
-                        let subst = lowerer.subst.get(id).unwrap();
-                        recurse(lowerer, subst, infos, precedence)
-                    }
-                }
-
-                ir::Ty::Nat => String::from("nat"),
-                ir::Ty::Int => String::from("int"),
-                ir::Ty::Num => String::from("num"),
-                ir::Ty::Str => String::from("str"),
-
-                ir::Ty::Tuple(fields) => {
-                    let f = fields
-                        .iter()
-                        .map(|field| recurse(lowerer, field, infos, 0))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-
-                    if precedence > 0 { format!("({f})") } else { f }
-                }
-
-                ir::Ty::Record(ty) => recurse_record(lowerer, ty, infos),
-
-                ir::Ty::Union(ty) => {
-                    let f = recurse_union(lowerer, ty, infos);
-
-                    if precedence > 4 { format!("({f})") } else { f }
-                }
-
-                ir::Ty::Alias(ty) => {
-                    let args = ty.args.iter().map(|ty| recurse(lowerer, ty, infos, 5));
-                    let f = iter::once(lowerer.aliases[ty.alias].name.to_string())
-                        .chain(args)
-                        .collect::<Vec<_>>()
-                        .join(" ");
-
-                    if precedence > 4 { format!("({f})") } else { f }
-                }
-
-                ir::Ty::Lambda(ty) => {
-                    let input = recurse(lowerer, &ty.input, infos, 2);
-                    let output = recurse(lowerer, &ty.output, infos, 1);
-
-                    let f = format!("{} -> {}", input, output);
-
-                    if precedence > 1 { format!("({f})") } else { f }
-                }
-
-                ir::Ty::Monad(ty) => {
-                    let ty = recurse(lowerer, ty, infos, 0);
-                    let f = format!("!{ty}");
-
-                    if precedence > 1 { format!("({f})") } else { f }
-                }
-            }
-        }
-
-        let infos = self.enumerate_infer_ty(ty);
-
-        let bounds = infos
-            .iter()
-            .filter_map(|(id, info)| {
-                let bound = if info.recursive
-                    && let Some(ty) = self.subst.get(id)
-                {
-                    recurse(self, ty, &infos, 0)
-                } else {
-                    match self.bounds[*id] {
-                        ir::Bounds::Record(ref ty) => recurse_record(self, ty, &infos),
-                        ir::Bounds::Union(ref ty) => recurse_union(self, ty, &infos),
-                        ir::Bounds::None => return None,
-                    }
-                };
-
-                Some(format!("'{}: {bound}", info.name))
-            })
-            .collect::<Vec<_>>()
-            .join(" and ");
-
-        let f = recurse(self, ty, &infos, 0);
-
-        if !bounds.is_empty() {
-            format!("{f} where {bounds}")
-        } else {
-            f
+            self.emitter.emit(diagnostic);
         }
     }
 
-    pub(super) fn enumerate_infer_ty(&self, ty: &ir::Ty) -> HashMap<Id<ir::Bounds>, InferTyInfo> {
-        fn recurse_record(
-            lowerer: &Lowerer<'_>,
-            ty: &ir::RecordTy,
-            seen: &mut Vec<Id<ir::Bounds>>,
-            infos: &mut HashMap<Id<ir::Bounds>, InferTyInfo>,
-        ) {
-            for field in &ty.fields {
-                recurse(lowerer, &field.ty, seen, infos);
-            }
-        }
-
-        fn recurse_union(
-            lowerer: &Lowerer<'_>,
-            ty: &ir::UnionTy,
-            seen: &mut Vec<Id<ir::Bounds>>,
-            infos: &mut HashMap<Id<ir::Bounds>, InferTyInfo>,
-        ) {
-            for variant in &ty.variants {
-                if let Some(ref ty) = variant.ty {
-                    recurse(lowerer, ty, seen, infos);
-                }
-            }
-        }
-
-        fn recurse_infer(
-            lowerer: &Lowerer<'_>,
-            mut id: Id<ir::Bounds>,
-            seen: &mut Vec<Id<ir::Bounds>>,
-            infos: &mut HashMap<Id<ir::Bounds>, InferTyInfo>,
-        ) {
-            let n = infos.len();
-
-            while let Some(ir::Ty::Infer(subst)) = lowerer.subst.get(&id) {
-                id = *subst;
-            }
-
-            if seen.contains(&id) {
-                let info = infos.entry(id).or_insert_with(|| InferTyInfo::new(n));
-                info.recursive = true;
-                return;
-            }
-
-            seen.push(id);
-
-            if let Some(ty) = lowerer.subst.get(&id) {
-                recurse(lowerer, ty, seen, infos);
-                seen.pop();
-                return;
-            }
-
-            let info = infos.entry(id).or_insert_with(|| InferTyInfo::new(n));
-            info.occurences += 1;
-
-            match lowerer.bounds[id] {
-                ir::Bounds::Record(ref ty) => recurse_record(lowerer, ty, seen, infos),
-                ir::Bounds::Union(ref ty) => recurse_union(lowerer, ty, seen, infos),
-                ir::Bounds::None => {}
-            }
-
-            seen.pop();
-        }
-
-        fn recurse(
-            lowerer: &Lowerer<'_>,
-            ty: &ir::Ty,
-            seen: &mut Vec<Id<ir::Bounds>>,
-            infos: &mut HashMap<Id<ir::Bounds>, InferTyInfo>,
-        ) {
-            match ty {
-                ir::Ty::Infer(id) => recurse_infer(lowerer, *id, seen, infos),
-
-                ir::Ty::Nat | ir::Ty::Int | ir::Ty::Num | ir::Ty::Str => {}
-
-                ir::Ty::Tuple(fields) => {
-                    for field in fields {
-                        recurse(lowerer, field, seen, infos);
-                    }
-                }
-
-                ir::Ty::Lambda(ty) => {
-                    recurse(lowerer, &ty.input, seen, infos);
-                    recurse(lowerer, &ty.output, seen, infos);
-                }
-
-                ir::Ty::Alias(ty) => {
-                    for arg in &ty.args {
-                        recurse(lowerer, arg, seen, infos);
-                    }
-                }
-
-                ir::Ty::Record(ty) => recurse_record(lowerer, ty, seen, infos),
-                ir::Ty::Union(ty) => recurse_union(lowerer, ty, seen, infos),
-                ir::Ty::Monad(ty) => recurse(lowerer, ty, seen, infos),
-            }
-        }
-
-        let mut seen = Vec::new();
-        let mut info = HashMap::new();
-        recurse(self, ty, &mut seen, &mut info);
-        info
-    }
-
-    pub(super) fn unify(&mut self, lhs: &ir::Ty, rhs: &ir::Ty, span: Span) {
+    fn try_unify(&mut self, lhs: &Ty, rhs: &Ty) -> Result<(), ()> {
         if let Some(lhs) = self.subst_shallow(lhs).cloned() {
-            return self.unify(&lhs, rhs, span);
+            return self.try_unify(&lhs, rhs);
         } else if let Some(rhs) = self.subst_shallow(rhs).cloned() {
-            return self.unify(lhs, &rhs, span);
+            return self.try_unify(lhs, &rhs);
         }
 
         let mut state = DefaultHasher::new();
@@ -452,96 +267,97 @@ impl Lowerer<'_> {
         let hash = state.finish();
 
         if !self.cache.insert(hash) {
-            return;
+            return Ok(());
         }
 
         if lhs == rhs {
-            return;
+            return Ok(());
         }
 
         match (lhs, rhs) {
-            (ir::Ty::Infer(id), ty) => self.unify_infer_ty(*id, ty, span),
-            (ty, ir::Ty::Infer(id)) => self.unify_infer_ty(*id, ty, span),
+            (Ty::Infer(id), ty) => self.try_unify_infer_ty(*id, ty),
+            (ty, Ty::Infer(id)) => self.try_unify_infer_ty(*id, ty),
 
-            (lhs, rhs) => self.unify_ty_ty(lhs, rhs, span),
+            (lhs, rhs) => self.try_unify_ty_ty(lhs, rhs),
         }
     }
 
-    fn unify_infer_ty(&mut self, id: Id<ir::Bounds>, ty: &ir::Ty, span: Span) {
+    fn try_unify_infer_ty(&mut self, id: Id<Bounds>, ty: &Ty) -> Result<(), ()> {
         match self.bounds[id] {
-            ir::Bounds::Record(..) => todo!(),
+            Bounds::Numeric(bound) => self.try_constrain_numeric(ty, bound)?,
 
-            ir::Bounds::Union(ref target) => {
+            Bounds::Record(..) => todo!(),
+
+            Bounds::Union(ref target) => {
                 for variant in target.variants.clone() {
-                    self.constrain_variant(ty, variant.name, variant.ty.as_ref(), span);
+                    self.try_constrain_variant(ty, variant.name, variant.payload.as_ref())?;
                 }
             }
 
-            ir::Bounds::None => {}
+            Bounds::None => {}
         }
 
         self.subst.insert(id, ty.clone());
+
+        Ok(())
     }
 
-    fn unify_ty_ty(&mut self, lhs: &ir::Ty, rhs: &ir::Ty, span: Span) {
+    fn try_unify_ty_ty(&mut self, lhs: &Ty, rhs: &Ty) -> Result<(), ()> {
         match (lhs, rhs) {
-            (ir::Ty::Num, ir::Ty::Num) => {}
+            (Ty::Infer(..), _) | (_, Ty::Infer(..)) => unreachable!(),
 
-            (ir::Ty::Lambda(lhs), ir::Ty::Lambda(rhs)) => {
-                self.unify(&lhs.input, &rhs.input, span);
-                self.unify(&lhs.output, &rhs.output, span);
+            (Ty::Generic(lhs), Ty::Generic(rhs)) if lhs == rhs => {}
+            (Ty::Numeric(lhs), Ty::Numeric(rhs)) if lhs == rhs => {}
+            (Ty::Str, Ty::Str) => {}
+
+            (Ty::Lambda(lhs), Ty::Lambda(rhs)) => {
+                self.try_unify(&lhs.input, &rhs.input)?;
+                self.try_unify(&lhs.output, &rhs.output)?;
             }
 
-            (ir::Ty::Monad(lhs), ir::Ty::Monad(rhs)) => {
-                self.unify(lhs, rhs, span);
+            (Ty::Monad(lhs), Ty::Monad(rhs)) => {
+                self.try_unify(lhs, rhs)?;
             }
 
-            (ir::Ty::Tuple(lhs), ir::Ty::Tuple(rhs)) if lhs.len() == rhs.len() => {
+            (Ty::Tuple(lhs), Ty::Tuple(rhs)) if lhs.len() == rhs.len() => {
                 for (lhs, rhs) in lhs.iter().zip(rhs) {
-                    self.unify(lhs, rhs, span);
+                    self.try_unify(lhs, rhs)?;
                 }
             }
 
-            (ir::Ty::Union(lhs_union), ir::Ty::Union(rhs_union)) => {
+            (Ty::Union(lhs_union), Ty::Union(rhs_union)) => {
                 for lhs in &lhs_union.variants {
-                    self.constrain_variant(rhs, lhs.name, lhs.ty.as_ref(), span);
+                    self.try_constrain_variant(rhs, lhs.name, lhs.payload.as_ref())?;
                 }
 
                 for rhs in &rhs_union.variants {
-                    self.constrain_variant(lhs, rhs.name, rhs.ty.as_ref(), span);
+                    self.try_constrain_variant(lhs, rhs.name, rhs.payload.as_ref())?;
                 }
             }
 
-            (ir::Ty::Alias(lhs), ir::Ty::Alias(rhs)) if lhs.alias == rhs.alias => {
+            (Ty::Alias(lhs), Ty::Alias(rhs)) if lhs.alias == rhs.alias => {
                 for (lhs, rhs) in lhs.args.iter().zip(&rhs.args) {
-                    self.unify(lhs, rhs, span);
+                    self.try_unify(lhs, rhs)?;
                 }
             }
 
-            (ir::Ty::Alias(lhs), rhs) => {
+            (Ty::Alias(lhs), rhs) => {
                 let lhs = self.instantiate_alias(lhs);
-                self.unify(&lhs, rhs, span);
+                self.try_unify(&lhs, rhs)?;
             }
 
-            (lhs, ir::Ty::Alias(rhs)) => {
+            (lhs, Ty::Alias(rhs)) => {
                 let rhs = self.instantiate_alias(rhs);
-                self.unify(lhs, &rhs, span);
+                self.try_unify(lhs, &rhs)?;
             }
 
-            (lhs, rhs) => {
-                let diagnostic = Diagnostic::error(format!(
-                    "expected type `{}` but found `{}`",
-                    self.format_ty(lhs),
-                    self.format_ty(rhs)
-                ))
-                .with_label(span, "required here");
-
-                self.emitter.emit(diagnostic);
-            }
+            (_, _) => return Err(()),
         }
+
+        Ok(())
     }
 
-    fn instantiate_alias(&mut self, ty: &ir::AliasTy) -> ir::Ty {
+    fn instantiate_alias(&mut self, ty: &AliasTy) -> Ty {
         let map = self.aliases[ty.alias]
             .params
             .iter()
@@ -553,41 +369,10 @@ impl Lowerer<'_> {
         self.instantiate_with(ty, map)
     }
 
-    fn subst_shallow(&self, ty: &ir::Ty) -> Option<&ir::Ty> {
+    fn subst_shallow(&self, ty: &Ty) -> Option<&Ty> {
         match ty {
-            ir::Ty::Infer(id) => self.subst.get(id),
+            Ty::Infer(id) => self.subst.get(id),
             _ => None,
         }
-    }
-}
-
-pub(super) struct InferTyInfo {
-    pub recursive: bool,
-    pub occurences: usize,
-    pub name: String,
-}
-
-impl InferTyInfo {
-    fn new(n: usize) -> Self {
-        Self {
-            recursive: false,
-            occurences: 0,
-            name: Self::generate_name(n),
-        }
-    }
-
-    fn generate_name(index: usize) -> String {
-        let letters = "abcdefghijklmnopqrstuvwxyz";
-
-        let mut name = String::new();
-        let mut i = index + 1;
-
-        while i > 0 {
-            let letter_index = (i - 1) % letters.len();
-            name.push(letters.chars().nth(letter_index).unwrap());
-            i = (i - 1) / letters.len();
-        }
-
-        name.chars().rev().collect()
     }
 }

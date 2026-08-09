@@ -5,6 +5,10 @@ pub struct FileId {
     pub index: u32,
 }
 
+impl FileId {
+    pub const DUMMY: Self = Self { index: u32::MAX };
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub file: FileId,
@@ -13,6 +17,8 @@ pub struct Span {
 }
 
 impl Span {
+    pub const DUMMY: Self = Self::new(FileId::DUMMY, u32::MAX, u32::MAX);
+
     pub const fn new(file: FileId, start: u32, end: u32) -> Self {
         Self { file, start, end }
     }

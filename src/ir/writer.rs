@@ -75,7 +75,7 @@ where
 
                 write!(self.writer, " in ")?;
 
-                self.write_captures(&self.program.scopes[expr.scope].caps)?;
+                self.write_captures(&self.program.scopes[expr.scope].captures)?;
 
                 self.write_line(indent + 1)?;
                 self.write_expr(indent + 1, &expr.expr)?;
@@ -98,7 +98,7 @@ where
                 write!(self.writer, "\\")?;
                 self.write_pat(&expr.input)?;
                 write!(self.writer, ". ")?;
-                self.write_captures(&self.program.scopes[expr.scope].caps)?;
+                self.write_captures(&self.program.scopes[expr.scope].captures)?;
 
                 self.write_line(indent + 1)?;
                 self.write_expr(indent + 1, &expr.expr)?;
@@ -145,6 +145,8 @@ where
                     self.write_expr(indent + 2, &arm.expr)?;
                 }
             }
+
+            Expr::Intrinsic(..) => todo!(),
 
             Expr::Error(..) => write!(self.writer, "{{error}}")?,
         }

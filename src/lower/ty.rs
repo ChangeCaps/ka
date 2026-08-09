@@ -1,4 +1,12 @@
-use crate::{arena::Id, ast, diagnostic::Diagnostic, ir, lower::Lowerer};
+use std::{collections::HashMap, iter};
+
+use crate::{
+    arena::Id,
+    ast,
+    diagnostic::Diagnostic,
+    ir::{AliasTy, Bounds, GenericTy, RecordTy, Scope, Ty, TyField, UnionTy, Variant},
+    lower::Lowerer,
+};
 
 pub(super) enum Generics<'a> {
     Static(&'a [Generic]),
@@ -7,7 +15,7 @@ pub(super) enum Generics<'a> {
 
 pub(super) struct Generic {
     pub name: &'static str,
-    pub ty: ir::Ty,
+    pub ty: Ty,
 }
 
 impl Generics<'_> {
@@ -24,17 +32,12 @@ impl Generics<'_> {
 }
 
 impl Lowerer<'_> {
-    pub(super) fn ty(
-        &mut self,
-        scope: Id<ir::Scope>,
-        generics: &mut Generics,
-        ty: &ast::Ty,
-    ) -> ir::Ty {
+    pub(super) fn ty(&mut self, scope: Id<Scope>, generics: &mut Generics, ty: &ast::Ty) -> Ty {
         match ty {
-            ast::Ty::Nat => ir::Ty::Nat,
-            ast::Ty::Int => ir::Ty::Int,
-            ast::Ty::Num => ir::Ty::Num,
-            ast::Ty::Str => ir::Ty::Str,
+            ast::Ty::Nat => Ty::NAT,
+            ast::Ty::Int => Ty::INT,
+            ast::Ty::Num => Ty::NUM,
+            ast::Ty::Str => Ty::Str,
 
             ast::Ty::Paren(ty) => self.ty(scope, generics, &ty.ty),
 
@@ -42,7 +45,7 @@ impl Lowerer<'_> {
                 let input = self.ty(scope, generics, &ty.input);
                 let output = self.ty(scope, generics, &ty.output);
 
-                ir::Ty::lambda(input, output)
+                Ty::lambda(input, output)
             }
 
             ast::Ty::Tuple(ty) => {
@@ -52,14 +55,14 @@ impl Lowerer<'_> {
                     .map(|ty| self.ty(scope, generics, ty))
                     .collect();
 
-                ir::Ty::Tuple(fields)
+                Ty::Tuple(fields)
             }
 
             ast::Ty::Record(ty) => self.record_ty(scope, generics, ty),
 
             ast::Ty::Monad(ty) => {
                 let ty = self.ty(scope, generics, &ty.ty);
-                ir::Ty::Monad(Box::new(ty))
+                Ty::Monad(Box::new(ty))
             }
 
             ast::Ty::Generic(ty) => self.generic_ty(scope, generics, ty),
@@ -70,13 +73,8 @@ impl Lowerer<'_> {
         }
     }
 
-    fn record_ty(
-        &mut self,
-        scope: Id<ir::Scope>,
-        generics: &mut Generics,
-        ty: &ast::RecordTy,
-    ) -> ir::Ty {
-        let mut fields: Vec<ir::TyField> = Vec::new();
+    fn record_ty(&mut self, scope: Id<Scope>, generics: &mut Generics, ty: &ast::RecordTy) -> Ty {
+        let mut fields: Vec<TyField> = Vec::new();
 
         for field in &ty.fields {
             let Some(name) = field.name else {
@@ -93,18 +91,18 @@ impl Lowerer<'_> {
                 continue;
             }
 
-            fields.push(ir::TyField { name, ty });
+            fields.push(TyField { name, ty });
         }
 
-        ir::Ty::Record(ir::RecordTy { fields })
+        Ty::Record(RecordTy { fields })
     }
 
     fn generic_ty(
         &mut self,
-        _scope: Id<ir::Scope>,
+        _scope: Id<Scope>,
         generics: &mut Generics,
         ty: &ast::GenericTy,
-    ) -> ir::Ty {
+    ) -> Ty {
         if let Some(generic) = generics.as_slice().iter().find(|g| g.name == ty.name) {
             return generic.ty.clone();
         }
@@ -119,24 +117,23 @@ impl Lowerer<'_> {
             }
 
             Generics::Dynamic(generics) => {
-                let infer = self.add_inferred_type();
+                let bounds = self.bounds.add(Bounds::None);
+                let generic = Ty::Generic(GenericTy {
+                    name: ty.name,
+                    bounds,
+                });
 
                 generics.push(Generic {
                     name: ty.name,
-                    ty: infer.clone(),
+                    ty: generic.clone(),
                 });
 
-                infer
+                generic.clone()
             }
         }
     }
 
-    fn alias_ty(
-        &mut self,
-        scope: Id<ir::Scope>,
-        generics: &mut Generics,
-        ty: &ast::AliasTy,
-    ) -> ir::Ty {
+    fn alias_ty(&mut self, scope: Id<Scope>, generics: &mut Generics, ty: &ast::AliasTy) -> Ty {
         let Some(alias) = self.resolve_alias(scope, ty.import, ty.name) else {
             let diagnostic = Diagnostic::error(format!("type alias `{}` not defined", ty.name))
                 .with_label(ty.span, "found here");
@@ -160,16 +157,11 @@ impl Lowerer<'_> {
             return self.add_inferred_type();
         }
 
-        ir::Ty::Alias(ir::AliasTy { alias, args })
+        Ty::Alias(AliasTy { alias, args })
     }
 
-    fn union_ty(
-        &mut self,
-        scope: Id<ir::Scope>,
-        generics: &mut Generics,
-        ty: &ast::UnionTy,
-    ) -> ir::Ty {
-        let mut variants: Vec<ir::Variant> = Vec::new();
+    fn union_ty(&mut self, scope: Id<Scope>, generics: &mut Generics, ty: &ast::UnionTy) -> Ty {
+        let mut variants: Vec<Variant> = Vec::new();
 
         for variant in &ty.variants {
             let Some(name) = variant.name else {
@@ -188,9 +180,294 @@ impl Lowerer<'_> {
 
             let ty = variant.ty.as_ref().map(|ty| self.ty(scope, generics, ty));
 
-            variants.push(ir::Variant { name, ty });
+            variants.push(Variant { name, payload: ty });
         }
 
-        ir::Ty::Union(ir::UnionTy { variants })
+        Ty::Union(UnionTy { variants })
+    }
+
+    pub(super) fn format_ty(&self, ty: &Ty) -> String {
+        fn recurse_record(
+            lowerer: &Lowerer<'_>,
+            ty: &RecordTy,
+            infos: &HashMap<Id<Bounds>, BoundsInfo>,
+        ) -> String {
+            let fields = ty
+                .fields
+                .iter()
+                .map(|field| {
+                    let ty = recurse(lowerer, &field.ty, infos, 0);
+                    format!("{}: {}", field.name, ty)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            if fields.is_empty() {
+                String::from("{}")
+            } else {
+                format!("{{ {fields} }}")
+            }
+        }
+
+        fn recurse_union(
+            lowerer: &Lowerer<'_>,
+            ty: &UnionTy,
+            infos: &HashMap<Id<Bounds>, BoundsInfo>,
+        ) -> String {
+            ty.variants
+                .iter()
+                .map(|variant| {
+                    let f = format!(":{}", variant.name);
+
+                    match variant.payload {
+                        Some(ref ty) => {
+                            let ty = recurse(lowerer, ty, infos, 4);
+
+                            format!("{f} {ty}")
+                        }
+
+                        None => f,
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        }
+
+        fn recurse(
+            lowerer: &Lowerer<'_>,
+            ty: &Ty,
+            infos: &HashMap<Id<Bounds>, BoundsInfo>,
+            precedence: u8,
+        ) -> String {
+            match ty {
+                Ty::Infer(bounds) => {
+                    if let Some(info) = infos.get(bounds) {
+                        format!("'{}", info.name)
+                    } else {
+                        let subst = lowerer.subst.get(bounds).unwrap();
+                        recurse(lowerer, subst, infos, precedence)
+                    }
+                }
+
+                Ty::Generic(generic) => {
+                    format!("'{}", generic.name)
+                }
+
+                Ty::Numeric(numeric) => String::from(numeric.as_str()),
+                Ty::Str => String::from("str"),
+
+                Ty::Tuple(fields) => {
+                    let f = fields
+                        .iter()
+                        .map(|field| recurse(lowerer, field, infos, 0))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    if precedence > 0 { format!("({f})") } else { f }
+                }
+
+                Ty::Record(ty) => recurse_record(lowerer, ty, infos),
+
+                Ty::Union(ty) => {
+                    let f = recurse_union(lowerer, ty, infos);
+
+                    if precedence > 4 { format!("({f})") } else { f }
+                }
+
+                Ty::Alias(ty) => {
+                    let args = ty.args.iter().map(|ty| recurse(lowerer, ty, infos, 5));
+                    let f = iter::once(lowerer.aliases[ty.alias].name.to_string())
+                        .chain(args)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+
+                    if precedence > 4 { format!("({f})") } else { f }
+                }
+
+                Ty::Lambda(ty) => {
+                    let input = recurse(lowerer, &ty.input, infos, 2);
+                    let output = recurse(lowerer, &ty.output, infos, 1);
+
+                    let f = format!("{} -> {}", input, output);
+
+                    if precedence > 1 { format!("({f})") } else { f }
+                }
+
+                Ty::Monad(ty) => {
+                    let ty = recurse(lowerer, ty, infos, 2);
+                    let f = format!("!{ty}");
+
+                    if precedence > 3 { format!("({f})") } else { f }
+                }
+            }
+        }
+
+        let infos = self.enumerate_ty_bounds(ty);
+
+        let bounds = infos
+            .iter()
+            .filter_map(|(id, info)| {
+                let bound = if info.recursive
+                    && let Some(ty) = self.subst.get(id)
+                {
+                    recurse(self, ty, &infos, 0)
+                } else {
+                    match self.bounds[*id] {
+                        Bounds::Numeric(bound) => String::from(bound.as_str()),
+                        Bounds::Record(ref ty) => recurse_record(self, ty, &infos),
+                        Bounds::Union(ref ty) => recurse_union(self, ty, &infos),
+                        Bounds::None => return None,
+                    }
+                };
+
+                Some(format!("'{}: {bound}", info.name))
+            })
+            .collect::<Vec<_>>()
+            .join(" and ");
+
+        let f = recurse(self, ty, &infos, 0);
+
+        if !bounds.is_empty() {
+            format!("{f} where {bounds}")
+        } else {
+            f
+        }
+    }
+
+    pub(super) fn enumerate_ty_bounds(&self, ty: &Ty) -> HashMap<Id<Bounds>, BoundsInfo> {
+        fn recurse_record(
+            lowerer: &Lowerer<'_>,
+            ty: &RecordTy,
+            seen: &mut Vec<Id<Bounds>>,
+            infos: &mut HashMap<Id<Bounds>, BoundsInfo>,
+        ) {
+            for field in &ty.fields {
+                recurse(lowerer, &field.ty, seen, infos);
+            }
+        }
+
+        fn recurse_union(
+            lowerer: &Lowerer<'_>,
+            ty: &UnionTy,
+            seen: &mut Vec<Id<Bounds>>,
+            infos: &mut HashMap<Id<Bounds>, BoundsInfo>,
+        ) {
+            for variant in &ty.variants {
+                if let Some(ref ty) = variant.payload {
+                    recurse(lowerer, ty, seen, infos);
+                }
+            }
+        }
+
+        fn recurse_infer(
+            lowerer: &Lowerer<'_>,
+            mut id: Id<Bounds>,
+            seen: &mut Vec<Id<Bounds>>,
+            infos: &mut HashMap<Id<Bounds>, BoundsInfo>,
+        ) {
+            let n = infos.len();
+
+            while let Some(Ty::Infer(subst)) = lowerer.subst.get(&id) {
+                id = *subst;
+            }
+
+            if seen.contains(&id) {
+                let info = infos.entry(id).or_insert_with(|| BoundsInfo::new(n));
+                info.recursive = true;
+                return;
+            }
+
+            seen.push(id);
+
+            if let Some(ty) = lowerer.subst.get(&id) {
+                recurse(lowerer, ty, seen, infos);
+                seen.pop();
+                return;
+            }
+
+            let info = infos.entry(id).or_insert_with(|| BoundsInfo::new(n));
+            info.occurences += 1;
+
+            match lowerer.bounds[id] {
+                Bounds::Numeric(..) => {}
+                Bounds::Record(ref ty) => recurse_record(lowerer, ty, seen, infos),
+                Bounds::Union(ref ty) => recurse_union(lowerer, ty, seen, infos),
+                Bounds::None => {}
+            }
+
+            seen.pop();
+        }
+
+        fn recurse(
+            lowerer: &Lowerer<'_>,
+            ty: &Ty,
+            seen: &mut Vec<Id<Bounds>>,
+            infos: &mut HashMap<Id<Bounds>, BoundsInfo>,
+        ) {
+            match ty {
+                Ty::Infer(bounds) | Ty::Generic(GenericTy { bounds, .. }) => {
+                    recurse_infer(lowerer, *bounds, seen, infos)
+                }
+
+                Ty::Numeric(..) | Ty::Str => {}
+
+                Ty::Tuple(fields) => {
+                    for field in fields {
+                        recurse(lowerer, field, seen, infos);
+                    }
+                }
+
+                Ty::Lambda(ty) => {
+                    recurse(lowerer, &ty.input, seen, infos);
+                    recurse(lowerer, &ty.output, seen, infos);
+                }
+
+                Ty::Alias(ty) => {
+                    for arg in &ty.args {
+                        recurse(lowerer, arg, seen, infos);
+                    }
+                }
+
+                Ty::Record(ty) => recurse_record(lowerer, ty, seen, infos),
+                Ty::Union(ty) => recurse_union(lowerer, ty, seen, infos),
+                Ty::Monad(ty) => recurse(lowerer, ty, seen, infos),
+            }
+        }
+
+        let mut seen = Vec::new();
+        let mut info = HashMap::new();
+        recurse(self, ty, &mut seen, &mut info);
+        info
+    }
+}
+
+pub(super) struct BoundsInfo {
+    pub recursive: bool,
+    pub occurences: usize,
+    pub name: String,
+}
+
+impl BoundsInfo {
+    fn new(n: usize) -> Self {
+        Self {
+            recursive: false,
+            occurences: 0,
+            name: Self::generate_name(n),
+        }
+    }
+
+    fn generate_name(index: usize) -> String {
+        let letters = "abcdefghijklmnopqrstuvwxyz";
+
+        let mut name = String::new();
+        let mut i = index + 1;
+
+        while i > 0 {
+            let letter_index = (i - 1) % letters.len();
+            name.push(letters.chars().nth(letter_index).unwrap());
+            i = (i - 1) / letters.len();
+        }
+
+        name.chars().rev().collect()
     }
 }

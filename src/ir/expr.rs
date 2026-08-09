@@ -17,6 +17,7 @@ pub enum Expr {
     Binary(BinaryExpr),
     Tuple(TupleExpr),
     Match(MatchExpr),
+    Intrinsic(IntrinsicExpr),
     Error(Ty),
 }
 
@@ -128,11 +129,27 @@ pub struct Arm {
     pub expr: Expr,
 }
 
+#[derive(Clone, Debug)]
+pub struct IntrinsicExpr {
+    pub intrinsic: Intrinsic,
+    pub inputs: Vec<Expr>,
+    pub ty: Ty,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Intrinsic {
+    StringLength,
+    StringFormat,
+    StringPrepend,
+    StringSplitAt,
+    StringFind,
+}
+
 impl Expr {
     pub fn unit() -> Self {
         Self::Record(RecordExpr {
             fields: Vec::new(),
-            ty: Ty::unit(),
+            ty: Ty::UNIT,
         })
     }
 
@@ -150,6 +167,7 @@ impl Expr {
             Expr::Binary(expr) => expr.ty.clone(),
             Expr::Tuple(expr) => expr.ty.clone(),
             Expr::Match(expr) => expr.ty.clone(),
+            Expr::Intrinsic(expr) => expr.ty.clone(),
             Expr::Error(ty) => ty.clone(),
         }
     }

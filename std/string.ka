@@ -1,10 +1,46 @@
 import "std:list.ka"
+import "std:option.ka"
 
-extern "builtin::string::format" format is 'a -> str
+import "intrinsic" as intrinsic
 
-extern "builtin::string::prepend" prepend is str -> str -> str
+is str -> nat
+let length x =
+  intrinsic::string-length x
 
-extern "builtin::string::split" split is str -> str -> list str
+is 'a -> str
+let format x =
+  intrinsic::string-format x
+
+is str -> str -> str
+let prepend a b =
+  intrinsic::string-prepend (a, b)
+
+is nat -> str -> option (str, str)
+let split-at n s =
+  intrinsic::string-split-at (s, n)
+
+is str -> str -> option nat
+let find needle haystack =
+  intrinsic::string-find (haystack, needle)
 
 is str -> str -> str
 let append a b = prepend b a
+
+is str -> str -> str
+let trim prefix s =
+  match split-at (length prefix) s
+    :none -> s
+    :some (start, rest) ->
+      match start == prefix
+        :false -> s
+        :true -> rest
+
+is str -> str -> list str
+let split needle haystack =
+  find needle haystack
+    |> and-then \n. split-at n haystack
+    |> map-some \first, rest.
+      trim needle rest
+        |> split needle
+        |> push first
+    |> some-or (empty |> push haystack)

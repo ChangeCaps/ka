@@ -12,6 +12,15 @@ pub enum Def {
     Error(Span),
 }
 
+impl Def {
+    pub fn as_alias(&self) -> Option<&AliasDef> {
+        match self {
+            Self::Alias(def) => Some(def),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ImportDef {
     pub path: &'static str,
@@ -38,6 +47,7 @@ pub struct AliasDef {
 #[derive(Clone, Debug)]
 pub struct LetDef {
     pub ty: Option<Ty>,
+    pub is_rec: bool,
     pub pat: Pat,
     pub params: Vec<Pat>,
     pub is_bind: bool,

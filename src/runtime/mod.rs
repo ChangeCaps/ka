@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt,
+    env, fmt,
     hash::BuildHasherDefault,
     io::{self, Write},
     mem,
@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     arena::Id,
-    ir::{self, BinOp, Expr, GlobalKind, Pat, Program, Var, VarKind},
+    ir::{self, BinOp, Expr, Pat, Program, Var, VarKind},
 };
 
 type BuildFastHasher = BuildHasherDefault<seahash::SeaHasher>;
@@ -60,6 +60,13 @@ impl<'a> Value<'a> {
         Self::record(Default::default())
     }
 
+    pub fn list(items: impl IntoIterator<Item = Value<'a>>) -> Self {
+        items.into_iter().fold(Value::option(None), |rest, value| {
+            let tuple = Value::tuple(vec![value, rest].into());
+            Value::option(Some(tuple))
+        })
+    }
+
     pub fn record(fields: FastHashMap<&'static str, Self>) -> Self {
         Self::new(ValueKind::Record(fields))
     }
@@ -80,10 +87,24 @@ impl<'a> Value<'a> {
         Self::new(ValueKind::Monad(MonadValue::Pure(value)))
     }
 
-    pub fn as_string(&self) -> Option<&str> {
+    pub fn option(option: Option<Self>) -> Self {
+        match option {
+            Some(value) => Value::variant("some", Some(value)),
+            None => Value::variant("none", None),
+        }
+    }
+
+    pub fn as_usize(&self) -> usize {
         match self.kind() {
-            ValueKind::String(s) => Some(s),
-            _ => None,
+            ValueKind::Number(x) => *x as usize,
+            _ => unreachable!("value is not a number"),
+        }
+    }
+
+    pub fn as_string(&self) -> &str {
+        match self.kind() {
+            ValueKind::String(s) => s,
+            _ => unreachable!("value is not a string"),
         }
     }
 
@@ -190,7 +211,7 @@ pub enum LambdaValue<'a> {
     },
 
     Extern {
-        name: &'static str,
+        id: &'static str,
         args: Vec<Value<'a>>,
     },
 }
@@ -263,16 +284,16 @@ impl<'a> Runtime<'a> {
             externs: HashMap::default(),
         };
 
-        rt.add_extern("readln", 0, |_| {
+        rt.add_extern("io::readln", 0, |_| {
             Value::monad(|| {
                 let line = io::stdin().lines().next().unwrap().unwrap();
                 Value::string(line)
             })
         });
 
-        rt.add_extern("print", 1, |args| {
+        rt.add_extern("io::print", 1, |args| {
             Value::monad(move || {
-                let s = args[0].as_string().unwrap();
+                let s = args[0].as_string();
 
                 let mut stdout = io::stdout().lock();
                 let _ = stdout.write_all(s.as_bytes());
@@ -282,26 +303,8 @@ impl<'a> Runtime<'a> {
             })
         });
 
-        rt.add_extern("format", 1, |args| Value::string(args[0].to_string()));
-
-        rt.add_extern("prepend", 2, |args| {
-            let a = args[0].as_string().unwrap();
-            let b = args[1].as_string().unwrap();
-
-            Value::string(format!("{a}{b}"))
-        });
-
-        rt.add_extern("split", 2, |args| {
-            let needle = args[0].as_string().unwrap();
-            let haystack = args[1].as_string().unwrap();
-
-            haystack
-                .rsplit(needle)
-                .fold(Value::variant("none", None), |rest, s| {
-                    let string = Value::string(s.to_string());
-                    let tuple = Value::tuple(vec![string, rest].into());
-                    Value::variant("some", Some(tuple))
-                })
+        rt.add_extern("env::args", 0, |_| {
+            Value::monad(move || Value::list(env::args().map(Value::string).rev()))
         });
 
         rt
@@ -322,30 +325,22 @@ impl<'a> Runtime<'a> {
         );
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self, main: Id<Var>) {
         let mut frame = Frame::new();
 
         for id in self.program.order.iter().copied() {
             let global = &self.program.globals[id];
-
-            let value = if global.kind == GlobalKind::Lambda
-                && let Expr::Lambda(ref expr) = global.expr
-            {
-                Value::new(ValueKind::Lambda(LambdaValue::Intern {
-                    pat: &expr.input,
-                    expr: &expr.expr,
-                    vars: HashMap::default(),
-                }))
-            } else {
-                self.eval_expr(&frame, &global.expr)
-            };
-
-            if let ValueKind::Monad(monad) = value.kind() {
-                self.eval_monad(monad.clone());
-            }
-
+            let value = self.eval_expr(&frame, &global.expr);
             self.assign_pat(&mut frame, &global.pat, value);
         }
+
+        let main = self.globals[&main].clone();
+
+        let ValueKind::Monad(main) = main.kind().clone() else {
+            unreachable!();
+        };
+
+        self.eval_monad(main);
     }
 
     fn assign_pat(&mut self, frame: &mut Frame<'a>, pat: &Pat, value: Value<'a>) {
@@ -466,26 +461,32 @@ impl<'a> Runtime<'a> {
                 VarKind::Extern(id) => {
                     let r#extern = &self.program.externs[id];
 
-                    if self.externs[r#extern.name].params == 0 {
-                        return (self.externs[r#extern.name].f)(Vec::new());
+                    if let Some(r#extern) = self.externs.get(r#extern.id) {
+                        if r#extern.params == 0 {
+                            return (r#extern.f)(Vec::new());
+                        }
+                    } else {
+                        unreachable!("extern `{}` not found", r#extern.id);
                     }
 
                     Value::new(ValueKind::Lambda(LambdaValue::Extern {
-                        name: r#extern.name,
+                        id: r#extern.id,
                         args: Vec::new(),
                     }))
                 }
 
                 VarKind::Local => match frame.vars.get(&expr.var).cloned() {
                     Some(value) => value,
-                    None => unreachable!("{}", self.program.vars[expr.var].name),
+                    None => {
+                        unreachable!("variant not defined `{}`", self.program.vars[expr.var].name);
+                    }
                 },
             },
 
             Expr::Let(expr) => {
                 let mut frame = frame.clone();
-                let val = self.eval_expr(&frame, &expr.input);
-                self.assign_pat(&mut frame, &expr.pat, val);
+                let value = self.eval_expr(&frame, &expr.input);
+                self.assign_pat(&mut frame, &expr.pat, value);
                 self.eval_expr(&frame, &expr.expr)
             }
 
@@ -493,7 +494,7 @@ impl<'a> Runtime<'a> {
                 let input = self.eval_expr(frame, &expr.input);
 
                 let vars = self.program.scopes[expr.scope]
-                    .caps
+                    .captures
                     .iter()
                     .copied()
                     .map(|id| (id, frame.vars[&id].clone()))
@@ -529,10 +530,10 @@ impl<'a> Runtime<'a> {
                         self.eval_expr(&frame, expr)
                     }
 
-                    LambdaValue::Extern { name, args } => {
+                    LambdaValue::Extern { id, args } => {
                         args.push(input);
 
-                        let r#extern = &self.externs[name];
+                        let r#extern = &self.externs[id];
                         if r#extern.params != args.len() {
                             return lambda;
                         }
@@ -544,7 +545,7 @@ impl<'a> Runtime<'a> {
 
             Expr::Lambda(expr) => {
                 let vars = self.program.scopes[expr.scope]
-                    .caps
+                    .captures
                     .iter()
                     .copied()
                     .map(|id| (id, frame.vars[&id].clone()))
@@ -652,6 +653,57 @@ impl<'a> Runtime<'a> {
                 }
 
                 unreachable!("no arm matched")
+            }
+
+            Expr::Intrinsic(expr) => {
+                let inputs = expr
+                    .inputs
+                    .iter()
+                    .map(|expr| self.eval_expr(frame, expr))
+                    .collect::<Vec<_>>();
+
+                match expr.intrinsic {
+                    ir::Intrinsic::StringLength => {
+                        let input = inputs[0].as_string();
+                        Value::number(input.chars().count() as f64)
+                    }
+
+                    ir::Intrinsic::StringFormat => Value::string(inputs[0].to_string()),
+
+                    ir::Intrinsic::StringPrepend => {
+                        let lhs = inputs[0].as_string();
+                        let rhs = inputs[1].as_string();
+
+                        Value::string(lhs.to_string() + rhs)
+                    }
+
+                    ir::Intrinsic::StringSplitAt => {
+                        let haystack = inputs[0].as_string();
+                        let n = inputs[1].as_usize();
+
+                        let option = haystack.char_indices().nth(n).map(|(i, _)| {
+                            let (start, end) = haystack.split_at(i);
+                            let start = Value::string(start.into());
+                            let end = Value::string(end.into());
+
+                            Value::tuple(vec![start, end].into())
+                        });
+
+                        Value::option(option)
+                    }
+
+                    ir::Intrinsic::StringFind => {
+                        let haystack = inputs[0].as_string();
+                        let needle = inputs[1].as_string();
+
+                        let option = haystack.find(needle).map(|idx| {
+                            let (n, _) = haystack.char_indices().find(|(i, _)| *i == idx).unwrap();
+                            Value::number(n as f64)
+                        });
+
+                        Value::option(option)
+                    }
+                }
             }
 
             Expr::Error(..) => unreachable!(),
