@@ -76,7 +76,6 @@ impl Lowerer<'_> {
             .imports
             .iter()
             .rev()
-            .filter(|import| import.name.is_none())
             .find_map(|import| self.find_var(import.scope, name))
     }
 
@@ -118,7 +117,6 @@ impl Lowerer<'_> {
         self.scopes[scope]
             .imports
             .iter()
-            .filter(|import| import.name.is_none())
             .find_map(|import| self.find_alias(import.scope, name))
     }
 

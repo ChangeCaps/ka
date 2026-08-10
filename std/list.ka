@@ -35,6 +35,15 @@ fold acc f xs =
       let acc = f acc x
       fold acc f xs
 
+is ('a -> !'b) -> list 'a -> !list 'b
+each f xs =
+  match xs
+    :none -> do :none
+    :some (x, xs) -> do
+      let x <- f x
+      let xs <- each f xs
+      do push x xs
+
 is ('a -> 'a -> 'a) -> list 'a -> option 'a
 reduce f xs =
   xs |> fold (:none) \acc x.

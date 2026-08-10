@@ -242,10 +242,8 @@ impl Lowerer<'_> {
     }
 
     fn try_unify(&mut self, lhs: &Ty, rhs: &Ty) -> Result<(), ()> {
-        if let Some(lhs) = self.subst_shallow(lhs).cloned() {
-            return self.try_unify(&lhs, rhs);
-        } else if let Some(rhs) = self.subst_shallow(rhs).cloned() {
-            return self.try_unify(lhs, &rhs);
+        if lhs == rhs {
+            return Ok(());
         }
 
         let mut state = DefaultHasher::new();
@@ -258,8 +256,10 @@ impl Lowerer<'_> {
             return Ok(());
         }
 
-        if lhs == rhs {
-            return Ok(());
+        if let Some(lhs) = self.subst_shallow(lhs).cloned() {
+            return self.try_unify(&lhs, rhs);
+        } else if let Some(rhs) = self.subst_shallow(rhs).cloned() {
+            return self.try_unify(lhs, &rhs);
         }
 
         match (lhs, rhs) {
@@ -367,8 +367,17 @@ impl Lowerer<'_> {
             .zip(ty.args.iter().cloned())
             .collect::<HashMap<_, _>>();
 
-        let ty = self.aliases[ty.alias].ty.clone();
-        self.instantiate_inferred_with(ty, map)
+        let mut ty = self.aliases[ty.alias].ty.clone();
+
+        Self::map_ty(&mut ty, |ty| {
+            if let Ty::Infer(bound) = ty
+                && let Some(subst) = map.get(bound)
+            {
+                *ty = subst.clone();
+            }
+        });
+
+        ty
     }
 
     fn subst_shallow(&self, ty: &Ty) -> Option<&Ty> {
