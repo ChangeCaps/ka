@@ -10,7 +10,7 @@ pub enum Ty {
     Union(UnionTy),
     Alias(AliasTy),
     Monad(Box<Ty>),
-    Infer(Id<Bounds>),
+    Infer(Id<Bound>),
     Generic(GenericTy),
 }
 
@@ -99,15 +99,24 @@ pub struct TyField {
     pub ty: Ty,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct UnionTy {
-    pub variants: Vec<Variant>,
+impl RecordTy {
+    pub fn get(&self, name: &str) -> Option<&Ty> {
+        self.fields
+            .iter()
+            .find(|field| field.name == name)
+            .map(|field| &field.ty)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GenericTy {
     pub name: &'static str,
-    pub bounds: Id<Bounds>,
+    pub bound: Id<Bound>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct UnionTy {
+    pub variants: Vec<Variant>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -134,12 +143,12 @@ pub struct AliasTy {
 #[derive(Clone, Debug)]
 pub struct Alias {
     pub name: &'static str,
-    pub params: Vec<Id<Bounds>>,
+    pub params: Vec<Id<Bound>>,
     pub ty: Ty,
 }
 
 #[derive(Clone, Debug)]
-pub enum Bounds {
+pub enum Bound {
     Numeric(Numeric),
     Record(RecordTy),
     Union(UnionTy),

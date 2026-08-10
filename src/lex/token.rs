@@ -15,6 +15,7 @@ pub enum Token {
     Eof,
 
     // keywords
+    And,
     As,
     Do,
     Extern,
@@ -25,9 +26,10 @@ pub enum Token {
     Match,
     Nat,
     Num,
-    Rec,
+    Or,
     Str,
     Type,
+    With,
 
     // one-character symbols
     Eq,
@@ -81,6 +83,7 @@ impl fmt::Display for Token {
             Self::Eof => write!(f, "end of file"),
 
             // keywords
+            Self::And => write!(f, "and"),
             Self::As => write!(f, "as"),
             Self::Do => write!(f, "do"),
             Self::Extern => write!(f, "extern"),
@@ -91,9 +94,10 @@ impl fmt::Display for Token {
             Self::Match => write!(f, "match"),
             Self::Nat => write!(f, "nat"),
             Self::Num => write!(f, "num"),
-            Self::Rec => write!(f, "rec"),
+            Self::Or => write!(f, "or"),
             Self::Str => write!(f, "str"),
             Self::Type => write!(f, "type"),
+            Self::With => write!(f, "with"),
 
             // one-character symbols
             Self::Eq => write!(f, "="),

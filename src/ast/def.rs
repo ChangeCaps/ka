@@ -47,7 +47,6 @@ pub struct AliasDef {
 #[derive(Clone, Debug)]
 pub struct LetDef {
     pub ty: Option<Ty>,
-    pub is_rec: bool,
     pub pat: Pat,
     pub params: Vec<Pat>,
     pub is_bind: bool,

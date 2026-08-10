@@ -7,8 +7,10 @@ use crate::{
 pub enum Expr {
     Paren(ParenExpr),
     Num(NumExpr),
-    String(StringExpr),
+    Str(StrExpr),
     Named(NamedExpr),
+    Field(FieldExpr),
+    With(WithExpr),
     Call(CallExpr),
     Lambda(LambdaExpr),
     Variant(VariantExpr),
@@ -34,7 +36,7 @@ pub struct NumExpr {
 }
 
 #[derive(Clone, Debug)]
-pub struct StringExpr {
+pub struct StrExpr {
     pub string: &'static str,
     pub span: Span,
 }
@@ -43,6 +45,20 @@ pub struct StringExpr {
 pub struct NamedExpr {
     pub import: Option<&'static str>,
     pub name: &'static str,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldExpr {
+    pub input: Box<Expr>,
+    pub name: Option<&'static str>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct WithExpr {
+    pub input: Box<Expr>,
+    pub fields: Vec<ExprField>,
     pub span: Span,
 }
 
@@ -106,6 +122,8 @@ pub enum BinOp {
     LtEq,
     Eq,
     Ne,
+    And,
+    Or,
 }
 
 #[derive(Clone, Debug)]
@@ -151,8 +169,10 @@ impl Expr {
         match self {
             Self::Paren(expr) => expr.span,
             Self::Num(expr) => expr.span,
-            Self::String(expr) => expr.span,
+            Self::Str(expr) => expr.span,
             Self::Named(expr) => expr.span,
+            Self::Field(expr) => expr.span,
+            Self::With(expr) => expr.span,
             Self::Call(expr) => expr.span,
             Self::Lambda(expr) => expr.span,
             Self::Variant(expr) => expr.span,

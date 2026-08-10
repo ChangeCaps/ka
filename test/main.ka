@@ -1,8 +1,8 @@
-import "std:list.ka"
-import "std:io.ka"
-import "std:env.ka"
-import "std:string.ka"
-import "std:monad.ka"
+import "std:map"
+import "std:io"
 
 let main =
-  args |> bind debug
+  empty
+    |> insert "foo" 1
+    |> insert "bar" 2
+    |> debug

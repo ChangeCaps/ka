@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     arena::{Arena, Id},
-    ir::{Bounds, Extern, Global, Scope, Ty, Var},
+    ir::{Bound, Extern, Global, Scope, Ty, Var},
 };
 
 #[derive(Clone, Debug)]
@@ -14,6 +14,6 @@ pub struct Program {
     pub scopes: Arena<Scope>,
     pub vars: Arena<Var>,
 
-    pub bounds: Arena<Bounds>,
-    pub subst: HashMap<Id<Bounds>, Ty>,
+    pub bounds: Arena<Bound>,
+    pub subst: HashMap<Id<Bound>, Ty>,
 }

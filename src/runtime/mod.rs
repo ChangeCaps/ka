@@ -1,7 +1,7 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     env, fmt,
-    hash::BuildHasherDefault,
+    hash::{BuildHasherDefault, DefaultHasher, Hash, Hasher},
     io::{self, Write},
     mem,
     rc::Rc,
@@ -27,7 +27,7 @@ struct Extern<'a> {
     f: ExternFn<'a>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Hash)]
 pub struct Value<'a> {
     kind: Rc<ValueKind<'a>>,
 }
@@ -39,12 +39,20 @@ impl<'a> Value<'a> {
         }
     }
 
-    pub fn number(x: f64) -> Self {
-        Self::new(ValueKind::Number(x))
+    pub fn nat(x: u64) -> Self {
+        Self::new(ValueKind::Nat(x))
     }
 
-    pub fn string(s: String) -> Self {
-        Self::new(ValueKind::String(s))
+    pub fn int(x: i64) -> Self {
+        Self::new(ValueKind::Int(x))
+    }
+
+    pub fn num(x: f64) -> Self {
+        Self::new(ValueKind::Num(x))
+    }
+
+    pub fn str(s: String) -> Self {
+        Self::new(ValueKind::Str(s))
     }
 
     pub fn bool(value: bool) -> Self {
@@ -67,7 +75,7 @@ impl<'a> Value<'a> {
         })
     }
 
-    pub fn record(fields: FastHashMap<&'static str, Self>) -> Self {
+    pub fn record(fields: BTreeMap<&'static str, Self>) -> Self {
         Self::new(ValueKind::Record(fields))
     }
 
@@ -94,17 +102,35 @@ impl<'a> Value<'a> {
         }
     }
 
-    pub fn as_usize(&self) -> usize {
+    pub fn as_nat(&self) -> u64 {
         match self.kind() {
-            ValueKind::Number(x) => *x as usize,
-            _ => unreachable!("value is not a number"),
+            ValueKind::Nat(x) => *x,
+            _ => unreachable!("value is not a nat"),
         }
     }
 
-    pub fn as_string(&self) -> &str {
+    pub fn as_int(&self) -> i64 {
         match self.kind() {
-            ValueKind::String(s) => s,
-            _ => unreachable!("value is not a string"),
+            ValueKind::Int(x) => *x,
+            _ => unreachable!("value is not a int"),
+        }
+    }
+
+    pub fn as_num(&self) -> f64 {
+        match self.kind() {
+            ValueKind::Num(x) => *x,
+            _ => unreachable!("value is not a num"),
+        }
+    }
+
+    pub fn as_bool(&self) -> bool {
+        matches!(self.kind(), ValueKind::Variant("true", ..))
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self.kind() {
+            ValueKind::Str(s) => s,
+            _ => unreachable!("value is not a str"),
         }
     }
 
@@ -119,21 +145,49 @@ impl<'a> Value<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ValueKind<'a> {
-    Number(f64),
-    String(String),
+    Nat(u64),
+    Int(i64),
+    Num(f64),
+    Str(String),
     Variant(&'static str, Option<Value<'a>>),
     Tuple(Box<[Value<'a>]>),
-    Record(FastHashMap<&'static str, Value<'a>>),
+    Record(BTreeMap<&'static str, Value<'a>>),
     Monad(MonadValue<'a>),
     Lambda(LambdaValue<'a>),
+}
+
+impl Hash for ValueKind<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        mem::discriminant(self).hash(state);
+
+        match self {
+            ValueKind::Nat(x) => x.hash(state),
+            ValueKind::Int(x) => x.hash(state),
+            ValueKind::Num(x) => x.to_bits().hash(state),
+            ValueKind::Str(x) => x.hash(state),
+
+            ValueKind::Variant(name, value) => {
+                name.hash(state);
+                value.hash(state);
+            }
+
+            ValueKind::Tuple(values) => values.hash(state),
+
+            ValueKind::Record(fields) => fields.hash(state),
+
+            ValueKind::Monad(_) | ValueKind::Lambda(_) => {}
+        }
+    }
 }
 
 impl fmt::Display for Value<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn recurse(value: &Value, f: &mut fmt::Formatter<'_>, precedence: u8) -> fmt::Result {
             match value.kind() {
-                ValueKind::Number(x) => write!(f, "{x}"),
-                ValueKind::String(x) => write!(f, "\"{x}\""),
+                ValueKind::Nat(x) => write!(f, "{x}"),
+                ValueKind::Int(x) => write!(f, "{x}"),
+                ValueKind::Num(x) => write!(f, "{x}"),
+                ValueKind::Str(x) => write!(f, "\"{x}\""),
 
                 ValueKind::Variant(name, value) => {
                     if precedence >= 2 {
@@ -218,7 +272,7 @@ pub enum LambdaValue<'a> {
 
 impl PartialEq for LambdaValue<'_> {
     fn eq(&self, _other: &Self) -> bool {
-        false
+        true
     }
 }
 
@@ -238,7 +292,7 @@ pub enum MonadValue<'a> {
 
 impl PartialEq for MonadValue<'_> {
     fn eq(&self, _other: &Self) -> bool {
-        false
+        true
     }
 }
 
@@ -287,13 +341,13 @@ impl<'a> Runtime<'a> {
         rt.add_extern("io::readln", 0, |_| {
             Value::monad(|| {
                 let line = io::stdin().lines().next().unwrap().unwrap();
-                Value::string(line)
+                Value::str(line)
             })
         });
 
         rt.add_extern("io::print", 1, |args| {
             Value::monad(move || {
-                let s = args[0].as_string();
+                let s = args[0].as_str();
 
                 let mut stdout = io::stdout().lock();
                 let _ = stdout.write_all(s.as_bytes());
@@ -304,7 +358,7 @@ impl<'a> Runtime<'a> {
         });
 
         rt.add_extern("env::args", 0, |_| {
-            Value::monad(move || Value::list(env::args().map(Value::string).rev()))
+            Value::monad(move || Value::list(env::args().map(Value::str).rev()))
         });
 
         rt
@@ -451,8 +505,8 @@ impl<'a> Runtime<'a> {
     fn eval_expr(&mut self, frame: &Frame<'a>, expr: &'a Expr) -> Value<'a> {
         match expr {
             Expr::Value(expr) => match expr.value {
-                ir::Value::Num(x) => Value::number(x),
-                ir::Value::String(ref cow) => Value::string(cow.to_string()),
+                ir::Value::Num(x) => Value::num(x),
+                ir::Value::String(ref cow) => Value::str(cow.to_string()),
             },
 
             Expr::Var(expr) => match self.program.vars[expr.var].kind {
@@ -543,6 +597,31 @@ impl<'a> Runtime<'a> {
                 }
             }
 
+            Expr::With(expr) => {
+                let mut input = self.eval_expr(frame, &expr.input);
+
+                let ValueKind::Record(fields) = input.kind_mut() else {
+                    unreachable!();
+                };
+
+                for field in &expr.fields {
+                    let value = self.eval_expr(frame, &field.expr);
+                    fields.insert(field.name, value);
+                }
+
+                input
+            }
+
+            Expr::Field(expr) => {
+                let input = self.eval_expr(frame, &expr.input);
+
+                let ValueKind::Record(fields) = input.kind() else {
+                    unreachable!();
+                };
+
+                fields[expr.name].clone()
+            }
+
             Expr::Lambda(expr) => {
                 let vars = self.program.scopes[expr.scope]
                     .captures
@@ -585,41 +664,72 @@ impl<'a> Runtime<'a> {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
                         let mut value = lhs;
 
-                        let ValueKind::Number(lhs) = value.kind_mut() else {
-                            unreachable!()
-                        };
+                        match (value.kind_mut(), rhs.kind()) {
+                            (ValueKind::Nat(lhs), ValueKind::Nat(rhs)) => match expr.op {
+                                BinOp::Add => *lhs += rhs,
+                                BinOp::Sub => *lhs -= rhs,
+                                BinOp::Mul => *lhs *= rhs,
+                                _ => unreachable!(),
+                            },
 
-                        let ValueKind::Number(rhs) = rhs.kind() else {
-                            unreachable!()
-                        };
+                            (ValueKind::Int(lhs), ValueKind::Int(rhs)) => match expr.op {
+                                BinOp::Add => *lhs += rhs,
+                                BinOp::Sub => *lhs -= rhs,
+                                BinOp::Mul => *lhs *= rhs,
+                                _ => unreachable!(),
+                            },
 
-                        match expr.op {
-                            BinOp::Add => *lhs += rhs,
-                            BinOp::Sub => *lhs -= rhs,
-                            BinOp::Mul => *lhs *= rhs,
-                            BinOp::Div => *lhs /= rhs,
+                            (ValueKind::Num(lhs), ValueKind::Num(rhs)) => match expr.op {
+                                BinOp::Add => *lhs += rhs,
+                                BinOp::Sub => *lhs -= rhs,
+                                BinOp::Mul => *lhs *= rhs,
+                                BinOp::Div => *lhs /= rhs,
+                                _ => unreachable!(),
+                            },
 
-                            _ => unreachable!(),
+                            (_, _) => unreachable!(),
                         }
 
                         value
                     }
 
                     BinOp::Gt | BinOp::Lt | BinOp::GtEq | BinOp::LtEq => {
-                        let ValueKind::Number(lhs) = lhs.kind() else {
-                            unreachable!()
-                        };
+                        match (lhs.kind(), rhs.kind()) {
+                            (ValueKind::Nat(lhs), ValueKind::Nat(rhs)) => match expr.op {
+                                BinOp::Gt => Value::bool(lhs > rhs),
+                                BinOp::Lt => Value::bool(lhs < rhs),
+                                BinOp::GtEq => Value::bool(lhs >= rhs),
+                                BinOp::LtEq => Value::bool(lhs <= rhs),
+                                _ => unreachable!(),
+                            },
 
-                        let ValueKind::Number(rhs) = rhs.kind() else {
-                            unreachable!()
-                        };
+                            (ValueKind::Int(lhs), ValueKind::Int(rhs)) => match expr.op {
+                                BinOp::Gt => Value::bool(lhs > rhs),
+                                BinOp::Lt => Value::bool(lhs < rhs),
+                                BinOp::GtEq => Value::bool(lhs >= rhs),
+                                BinOp::LtEq => Value::bool(lhs <= rhs),
+                                _ => unreachable!(),
+                            },
+
+                            (ValueKind::Num(lhs), ValueKind::Num(rhs)) => match expr.op {
+                                BinOp::Gt => Value::bool(lhs > rhs),
+                                BinOp::Lt => Value::bool(lhs < rhs),
+                                BinOp::GtEq => Value::bool(lhs >= rhs),
+                                BinOp::LtEq => Value::bool(lhs <= rhs),
+                                _ => unreachable!(),
+                            },
+
+                            (_, _) => unreachable!(),
+                        }
+                    }
+
+                    BinOp::And | BinOp::Or => {
+                        let lhs = lhs.as_bool();
+                        let rhs = rhs.as_bool();
 
                         match expr.op {
-                            BinOp::Gt => Value::bool(lhs > rhs),
-                            BinOp::Lt => Value::bool(lhs < rhs),
-                            BinOp::GtEq => Value::bool(lhs >= rhs),
-                            BinOp::LtEq => Value::bool(lhs <= rhs),
-
+                            BinOp::And => Value::bool(lhs && rhs),
+                            BinOp::Or => Value::bool(lhs || rhs),
                             _ => unreachable!(),
                         }
                     }
@@ -664,27 +774,27 @@ impl<'a> Runtime<'a> {
 
                 match expr.intrinsic {
                     ir::Intrinsic::StringLength => {
-                        let input = inputs[0].as_string();
-                        Value::number(input.chars().count() as f64)
+                        let input = inputs[0].as_str();
+                        Value::num(input.chars().count() as f64)
                     }
 
-                    ir::Intrinsic::StringFormat => Value::string(inputs[0].to_string()),
+                    ir::Intrinsic::StringFormat => Value::str(inputs[0].to_string()),
 
                     ir::Intrinsic::StringPrepend => {
-                        let lhs = inputs[0].as_string();
-                        let rhs = inputs[1].as_string();
+                        let lhs = inputs[0].as_str();
+                        let rhs = inputs[1].as_str();
 
-                        Value::string(lhs.to_string() + rhs)
+                        Value::str(lhs.to_string() + rhs)
                     }
 
                     ir::Intrinsic::StringSplitAt => {
-                        let haystack = inputs[0].as_string();
-                        let n = inputs[1].as_usize();
+                        let haystack = inputs[0].as_str();
+                        let n = inputs[1].as_nat() as usize;
 
                         let option = haystack.char_indices().nth(n).map(|(i, _)| {
                             let (start, end) = haystack.split_at(i);
-                            let start = Value::string(start.into());
-                            let end = Value::string(end.into());
+                            let start = Value::str(start.into());
+                            let end = Value::str(end.into());
 
                             Value::tuple(vec![start, end].into())
                         });
@@ -693,15 +803,22 @@ impl<'a> Runtime<'a> {
                     }
 
                     ir::Intrinsic::StringFind => {
-                        let haystack = inputs[0].as_string();
-                        let needle = inputs[1].as_string();
+                        let haystack = inputs[0].as_str();
+                        let needle = inputs[1].as_str();
 
                         let option = haystack.find(needle).map(|idx| {
                             let (n, _) = haystack.char_indices().find(|(i, _)| *i == idx).unwrap();
-                            Value::number(n as f64)
+                            Value::num(n as f64)
                         });
 
                         Value::option(option)
+                    }
+
+                    ir::Intrinsic::Hash => {
+                        let mut state = DefaultHasher::new();
+                        inputs[0].hash(&mut state);
+
+                        Value::nat(state.finish())
                     }
                 }
             }

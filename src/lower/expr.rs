@@ -3,9 +3,9 @@ use crate::{
     ast,
     diagnostic::{Diagnostic, Span},
     ir::{
-        Arm, BinOp, BinaryExpr, BindExpr, CallExpr, Expr, ExprField, LetExpr, MatchExpr, Numeric,
-        Pat, PureExpr, RecordExpr, RecordTy, Scope, ScopeKind, TupleExpr, Ty, TyField, Value,
-        ValueExpr, VarExpr, VarKind, VariantExpr, WildPat,
+        Arm, BinOp, BinaryExpr, BindExpr, CallExpr, Expr, ExprField, FieldExpr, LetExpr, MatchExpr,
+        Numeric, Pat, PureExpr, RecordExpr, RecordTy, Scope, ScopeKind, TupleExpr, Ty, TyField,
+        Value, ValueExpr, VarExpr, VarKind, VariantExpr, WildPat, WithExpr,
     },
     lower::{Generics, Lowerer, exhaust},
 };
@@ -15,8 +15,10 @@ impl Lowerer<'_> {
         match expr {
             ast::Expr::Paren(expr) => self.paren_expr(scope, expr),
             ast::Expr::Num(expr) => self.num_expr(scope, expr),
-            ast::Expr::String(expr) => self.string_expr(scope, expr),
+            ast::Expr::Str(expr) => self.str_expr(scope, expr),
             ast::Expr::Named(expr) => self.named_expr(scope, expr),
+            ast::Expr::Field(expr) => self.field_expr(scope, expr),
+            ast::Expr::With(expr) => self.with_expr(scope, expr),
             ast::Expr::Call(expr) => self.call_expr(scope, expr),
             ast::Expr::Lambda(expr) => self.lambda_expr(scope, expr),
             ast::Expr::Variant(expr) => self.variant_expr(scope, expr),
@@ -43,7 +45,7 @@ impl Lowerer<'_> {
         Expr::Value(ValueExpr { value, ty })
     }
 
-    fn string_expr(&mut self, _scope: Id<Scope>, expr: &ast::StringExpr) -> Expr {
+    fn str_expr(&mut self, _scope: Id<Scope>, expr: &ast::StrExpr) -> Expr {
         Expr::Value(ValueExpr {
             value: Value::String(expr.string.into()),
             ty: Ty::Str,
@@ -85,6 +87,50 @@ impl Lowerer<'_> {
 
         let ty = self.add_inferred_type();
         Expr::Error(ty)
+    }
+
+    fn field_expr(&mut self, scope: Id<Scope>, expr: &ast::FieldExpr) -> Expr {
+        let input = self.expr(scope, &expr.input);
+        let input = Box::new(input);
+
+        let Some(name) = expr.name else {
+            return self.error_expr(expr.span);
+        };
+
+        let ty = self.add_inferred_type();
+        self.constrain_field(&input.ty(), name, &ty, expr.span);
+
+        Expr::Field(FieldExpr { input, name, ty })
+    }
+
+    fn with_expr(&mut self, scope: Id<Scope>, expr: &ast::WithExpr) -> Expr {
+        let input = self.expr(scope, &expr.input);
+        let input = Box::new(input);
+
+        let ty = input.ty();
+
+        let mut fields: Vec<ExprField> = Vec::new();
+
+        for field in &expr.fields {
+            let Some(name) = field.name else {
+                continue;
+            };
+
+            if fields.iter().any(|f| f.name == name) {
+                let diagnostic = Diagnostic::error(format!("field `{}` already defined", name))
+                    .with_label(field.span, "here");
+
+                self.emitter.emit(diagnostic);
+                continue;
+            }
+
+            let expr = self.expr(scope, &field.expr);
+            self.constrain_field(&ty, name, &expr.ty(), field.span);
+
+            fields.push(ExprField { name, expr });
+        }
+
+        Expr::With(WithExpr { input, fields, ty })
     }
 
     fn call_expr(&mut self, scope: Id<Scope>, expr: &ast::CallExpr) -> Expr {
@@ -185,7 +231,13 @@ impl Lowerer<'_> {
 
             ast::BinOp::Gt | ast::BinOp::Lt | ast::BinOp::GtEq | ast::BinOp::LtEq => {
                 self.unify(&lhs.ty(), &rhs.ty(), expr.span);
-                self.constrain_numeric(&lhs.ty(), Numeric::Num, expr.span);
+
+                Ty::bool()
+            }
+
+            ast::BinOp::And | ast::BinOp::Or => {
+                self.unify(&lhs.ty(), &rhs.ty(), expr.span);
+                self.unify(&lhs.ty(), &Ty::bool(), expr.span);
 
                 Ty::bool()
             }
@@ -208,6 +260,8 @@ impl Lowerer<'_> {
             ast::BinOp::LtEq => BinOp::LtEq,
             ast::BinOp::Eq => BinOp::Eq,
             ast::BinOp::Ne => BinOp::Ne,
+            ast::BinOp::And => BinOp::And,
+            ast::BinOp::Or => BinOp::Or,
         };
 
         Expr::Binary(BinaryExpr { op, lhs, rhs, ty })
@@ -459,7 +513,7 @@ impl Lowerer<'_> {
                 expr.expr.span(),
             );
 
-            self.unify(&target.ty(), &ty, expr.expr.span());
+            self.unify(&ty, &target.ty(), expr.expr.span());
 
             Box::new(target)
         };

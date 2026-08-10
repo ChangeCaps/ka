@@ -12,11 +12,19 @@ impl Lowerer<'_> {
         let scope = self.add_scope(ScopeKind::Module, None);
         self.imports.insert("intrinsic", scope);
 
+        self.add_hash();
+
         self.add_string_length();
         self.add_string_format();
         self.add_string_prepend();
         self.add_string_splitat();
         self.add_string_find();
+    }
+
+    fn add_hash(&mut self) {
+        let input = self.add_inferred_type();
+
+        self.add_intrinsic("hash", Intrinsic::Hash, [input], Ty::NAT);
     }
 
     fn add_string_length(&mut self) {

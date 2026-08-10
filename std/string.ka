@@ -1,5 +1,5 @@
-import "std:list.ka"
-import "std:option.ka"
+import "std:list"
+import "std:option"
 
 import "intrinsic" as intrinsic
 

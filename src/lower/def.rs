@@ -2,7 +2,7 @@ use crate::{
     arena::Id,
     ast,
     diagnostic::Diagnostic,
-    ir::{Alias, Bounds, Expr, LambdaExpr, Pat, Scope, ScopeKind, Ty, VarKind},
+    ir::{Alias, Bound, Expr, LambdaExpr, Pat, Scope, ScopeKind, Ty, VarKind},
     lower::{
         Lowerer,
         ty::{Generic, Generics},
@@ -16,27 +16,8 @@ impl Lowerer<'_> {
         kind: VarKind,
         def: &ast::LetDef,
     ) -> (Pat, Expr) {
-        if def.is_rec && def.params.is_empty() {
-            let diagnostic = Diagnostic::error("only functions are allowed to be recursive")
-                .with_label(def.span, "found here")
-                .with_note("try removing `rec`");
-
-            self.emitter.emit(diagnostic);
-        }
-
-        let (pat, expr) = match def.is_rec {
-            true => {
-                let pat = self.register_let_def(scope, kind, def);
-                let expr = self.complete_let_def(scope, def);
-                (pat, expr)
-            }
-
-            false => {
-                let expr = self.complete_let_def(scope, def);
-                let pat = self.register_let_def(scope, kind, def);
-                (pat, expr)
-            }
-        };
+        let expr = self.complete_let_def(scope, def);
+        let pat = self.register_let_def(scope, kind, def);
 
         self.unify(&pat.ty(), &expr.ty(), def.span);
 
@@ -99,7 +80,7 @@ impl Lowerer<'_> {
             let mut params = Vec::new();
 
             for param in &def.params {
-                let bounds = self.bounds.add(Bounds::None);
+                let bounds = self.bounds.add(Bound::None);
                 params.push(bounds);
 
                 let Some(name) = param else {

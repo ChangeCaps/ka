@@ -116,8 +116,6 @@ fn is(parser: &mut Parser) -> Def {
 fn r#let(parser: &mut Parser, ty: Option<Ty>) -> Def {
     let span = parser.expect(Token::Let);
 
-    let is_rec = parser.take(Token::Rec);
-
     let pat = parse::pat(parser);
     let params = let_params(parser);
 
@@ -131,7 +129,6 @@ fn r#let(parser: &mut Parser, ty: Option<Ty>) -> Def {
 
     Def::Let(LetDef {
         ty,
-        is_rec,
         pat,
         params,
         is_bind,

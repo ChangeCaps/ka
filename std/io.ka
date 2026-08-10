@@ -1,4 +1,4 @@
-import "std:string.ka"
+import "std:string"
 
 extern "io::readln" readln is !str
 

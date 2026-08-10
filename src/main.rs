@@ -44,7 +44,7 @@ impl Compiler {
     }
 
     fn run(mut self, main_package: &str) {
-        let main_module = format!("{main_package}:main.ka");
+        let main_module = format!("{main_package}:main");
 
         if !self.modules.iter().any(|module| module.name == main_module) {
             panic!("main module not found");
@@ -108,7 +108,7 @@ impl Compiler {
         }
 
         let name = path
-            .file_name()
+            .file_stem()
             .and_then(ffi::OsStr::to_str)
             .ok_or_else(|| io::Error::other("invalid `ka` file"))?;
 

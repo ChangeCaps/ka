@@ -1,4 +1,4 @@
-import "std:option.ka"
+import "std:option"
 
 type list 'a = option ('a, list 'a)
 

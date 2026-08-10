@@ -19,6 +19,7 @@ pub fn is_ty(token: Token) -> bool {
             | Token::Colon
             | Token::Bang
             | Token::OpenParen
+            | Token::OpenBrace
     )
 }
 

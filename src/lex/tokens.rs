@@ -319,6 +319,7 @@ impl<'a> Lexer<'a> {
 
     fn match_keyword(s: &str) -> Option<Token> {
         Some(match s {
+            "and" => Token::And,
             "as" => Token::As,
             "do" => Token::Do,
             "extern" => Token::Extern,
@@ -329,9 +330,10 @@ impl<'a> Lexer<'a> {
             "match" => Token::Match,
             "nat" => Token::Nat,
             "num" => Token::Num,
-            "rec" => Token::Rec,
+            "or" => Token::Or,
             "str" => Token::Str,
             "type" => Token::Type,
+            "with" => Token::With,
             "_" => Token::Under,
             _ => return None,
         })

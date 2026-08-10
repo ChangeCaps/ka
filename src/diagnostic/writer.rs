@@ -112,7 +112,10 @@ where
             end += l.len();
 
             if end > span.start as usize {
-                column = source[start..span.start as usize].chars().count() + 1;
+                let end = span.start as usize;
+                let start = start.min(end);
+
+                column = source[start..end].chars().count() + 1;
                 break;
             }
 

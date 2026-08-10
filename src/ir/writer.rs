@@ -94,6 +94,13 @@ where
                 write!(self.writer, ")")?;
             }
 
+            Expr::With(..) => todo!(),
+
+            Expr::Field(expr) => {
+                self.write_expr(indent, &expr.input)?;
+                write!(self.writer, ".{}", expr.name)?;
+            }
+
             Expr::Lambda(expr) => {
                 write!(self.writer, "\\")?;
                 self.write_pat(&expr.input)?;

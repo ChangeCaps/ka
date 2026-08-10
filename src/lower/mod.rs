@@ -7,7 +7,7 @@ use crate::{
     arena::{Arena, Id},
     ast,
     diagnostic::{Diagnostic, Emitter, Span},
-    ir::{Alias, Bounds, Extern, Global, Import, Pat, Program, Scope, ScopeKind, Ty, Var, VarKind},
+    ir::{Alias, Bound, Extern, Global, Import, Pat, Program, Scope, ScopeKind, Ty, Var, VarKind},
     lower::ty::Generics,
 };
 
@@ -34,8 +34,8 @@ pub struct Lowerer<'a> {
     scopes: Arena<Scope>,
     vars: Arena<Var>,
 
-    bounds: Arena<Bounds>,
-    subst: HashMap<Id<Bounds>, Ty>,
+    bounds: Arena<Bound>,
+    subst: HashMap<Id<Bound>, Ty>,
     cache: HashSet<u64>,
 
     prelude: Id<Scope>,
@@ -224,14 +224,6 @@ impl<'a> Lowerer<'a> {
             let kind = VarKind::Global(global);
             let pat = self.register_let_def(scope, kind, def);
 
-            if def.is_rec {
-                let diagnostic = Diagnostic::warning("redundant `rec` modifier")
-                    .with_label(def.span, "in `let` found here")
-                    .with_note("module level `let` are always recursive");
-
-                self.emitter.emit(diagnostic);
-            }
-
             let_defs.push((global, scope, pat, def));
         }
 
@@ -255,14 +247,16 @@ impl<'a> Lowerer<'a> {
 
         for (global, deps) in &dependencies {
             for (&dep, tys) in deps {
-                let mut ty = self.globals[dep].expr.ty();
                 let is_recursive = Self::depends_on(&dependencies, dep, *global);
 
-                if !is_recursive {
-                    ty = self.instantiate(ty);
-                }
-
                 for (infer, span) in tys {
+                    let mut ty = self.globals[dep].expr.ty();
+                    ty = self.instantiate_generics(ty);
+
+                    if !is_recursive {
+                        ty = self.instantiate_inferred(ty);
+                    }
+
                     self.unify(infer, &ty, *span);
                 }
             }

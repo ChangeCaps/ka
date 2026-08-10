@@ -1,0 +1,61 @@
+import "std:option"
+
+import "intrinsic" as intrinsic
+
+is 'a -> nat
+let hash x = intrinsic::hash x
+
+type map 'k 'v = option {
+  hash: nat
+  key: 'k
+  value: 'v
+
+  lhs: map 'k 'v
+  rhs: map 'k 'v
+}
+
+is map 'k 'v
+let empty = :none
+
+is 'k -> 'v -> map 'k 'v -> map 'k 'v
+let insert key value map =
+  insert-hashed (hash key) key value map
+
+is nat -> 'k -> 'v -> map 'k 'v -> map 'k 'v
+let insert-hashed hash key value map =
+  match map
+    :none -> :some {
+      hash: hash
+      key: key
+      value: value
+
+      lhs: :none
+      rhs: :none
+    }
+
+    :some node -> match node.key == key
+      :true -> :some node with {
+        value: value
+      }
+
+      :false -> match hash > node.hash
+        :true -> :some node with {
+          rhs: insert-hashed hash key value node.rhs
+        }
+
+        :false -> :some node with {
+          lhs: insert-hashed hash key value node.lhs
+        }
+
+is 'k -> map 'k 'v -> option 'v
+let get key map = get-hashed (hash key) key map
+
+is nat -> 'k -> map 'k 'v -> option 'v
+let get-hashed hash key map =
+  match map
+    :none -> :none
+    :some node -> match node.key == key
+      :true -> :some node.value
+      :false -> match hash > node.hash
+        :true -> get-hashed hash key node.rhs
+        :false -> get-hashed hash key node.lhs

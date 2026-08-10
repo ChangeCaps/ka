@@ -1,8 +1,8 @@
 use crate::{
     ast::{
         Arm, BinOp, BinaryExpr, BlockExpr, CallExpr, DoExpr, DoKind, DoStmt, Expr, ExprField,
-        LambdaExpr, MatchExpr, NamedExpr, NumExpr, ParenExpr, RecordExpr, StringExpr, TupleExpr,
-        VariantExpr,
+        FieldExpr, LambdaExpr, MatchExpr, NamedExpr, NumExpr, ParenExpr, RecordExpr, StrExpr,
+        TupleExpr, VariantExpr, WithExpr,
     },
     lex::Token,
     parse::{self, Parser},
@@ -18,6 +18,7 @@ pub fn is_expr(token: Token) -> bool {
             | Token::Colon
             | Token::Back
             | Token::OpenParen
+            | Token::OpenBrace
     )
 }
 
@@ -197,7 +198,7 @@ fn is_pipe_block(parser: &Parser) -> bool {
 }
 
 fn tuple(parser: &mut Parser) -> Expr {
-    let first = eq_ne(parser);
+    let first = or(parser);
 
     if !parser.is(Token::Comma) {
         return first;
@@ -207,13 +208,21 @@ fn tuple(parser: &mut Parser) -> Expr {
     let mut fields = vec![first];
 
     while parser.take(Token::Comma) {
-        let field = eq_ne(parser);
+        let field = or(parser);
 
         span = span.join(field.span());
         fields.push(field);
     }
 
     Expr::Tuple(TupleExpr { fields, span })
+}
+
+fn or(parser: &mut Parser) -> Expr {
+    binary(parser, &[(Token::Or, BinOp::Or)], and)
+}
+
+fn and(parser: &mut Parser) -> Expr {
+    binary(parser, &[(Token::And, BinOp::And)], eq_ne)
 }
 
 fn eq_ne(parser: &mut Parser) -> Expr {
@@ -284,11 +293,11 @@ fn variant(parser: &mut Parser) -> Expr {
 }
 
 fn call(parser: &mut Parser) -> Expr {
-    let mut expr = term(parser);
+    let mut expr = with(parser);
 
     while is_expr(parser.peek()) {
         let lambda = Box::new(expr);
-        let input = term(parser);
+        let input = with(parser);
         let input = Box::new(input);
 
         let span = lambda.span().join(input.span());
@@ -296,6 +305,45 @@ fn call(parser: &mut Parser) -> Expr {
         expr = Expr::Call(CallExpr {
             lambda,
             input,
+            span,
+        });
+    }
+
+    expr
+}
+
+fn with(parser: &mut Parser) -> Expr {
+    let expr = field(parser);
+
+    if !parser.take(Token::With) {
+        return expr;
+    }
+
+    parser.expect(Token::OpenBrace);
+    let fields = fields(parser);
+    let end = parser.expect(Token::CloseBrace);
+
+    let input = Box::new(expr);
+    let span = input.span().join(end);
+
+    Expr::With(WithExpr {
+        input,
+        fields,
+        span,
+    })
+}
+
+fn field(parser: &mut Parser) -> Expr {
+    let mut expr = term(parser);
+    let mut span = expr.span();
+
+    while parser.take(Token::Dot) {
+        span = span.join(parser.span());
+        let name = parser.expect_ident();
+
+        expr = Expr::Field(FieldExpr {
+            input: Box::new(expr),
+            name,
             span,
         });
     }
@@ -360,7 +408,7 @@ fn named(parser: &mut Parser, name: &'static str) -> Expr {
 fn string(parser: &mut Parser, string: &'static str) -> Expr {
     let span = parser.consume();
 
-    Expr::String(StringExpr { string, span })
+    Expr::Str(StrExpr { string, span })
 }
 
 fn lambda(parser: &mut Parser) -> Expr {
@@ -385,7 +433,15 @@ fn lambda(parser: &mut Parser) -> Expr {
 
 fn record(parser: &mut Parser) -> Expr {
     let start = parser.expect(Token::OpenBrace);
+    let fields = fields(parser);
+    let end = parser.expect(Token::CloseBrace);
 
+    let span = start.join(end);
+
+    Expr::Record(RecordExpr { fields, span })
+}
+
+fn fields(parser: &mut Parser) -> Vec<ExprField> {
     let mut fields = Vec::new();
 
     if parser.is(Token::Newline) {
@@ -394,7 +450,7 @@ fn record(parser: &mut Parser) -> Expr {
         parser.take_all(Token::Newline);
 
         while !parser.is(Token::Dedent) && !parser.is(Token::Eof) {
-            let field = field(parser);
+            let field = field_init(parser);
             fields.push(field);
 
             parser.take_all(Token::Newline);
@@ -403,7 +459,7 @@ fn record(parser: &mut Parser) -> Expr {
         parser.expect(Token::Dedent);
     } else {
         while !parser.is(Token::CloseBrace) && !parser.is(Token::Eof) {
-            let field = field(parser);
+            let field = field_init(parser);
             fields.push(field);
 
             if !parser.take(Token::Semi) {
@@ -412,14 +468,10 @@ fn record(parser: &mut Parser) -> Expr {
         }
     }
 
-    let end = parser.expect(Token::CloseBrace);
-
-    let span = start.join(end);
-
-    Expr::Record(RecordExpr { fields, span })
+    fields
 }
 
-fn field(parser: &mut Parser) -> ExprField {
+fn field_init(parser: &mut Parser) -> ExprField {
     let span = parser.span();
     let name = parser.expect_ident();
 

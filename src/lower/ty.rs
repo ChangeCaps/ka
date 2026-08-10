@@ -4,7 +4,7 @@ use crate::{
     arena::Id,
     ast,
     diagnostic::Diagnostic,
-    ir::{AliasTy, Bounds, GenericTy, RecordTy, Scope, Ty, TyField, UnionTy, Variant},
+    ir::{AliasTy, Bound, GenericTy, RecordTy, Scope, Ty, TyField, UnionTy, Variant},
     lower::Lowerer,
 };
 
@@ -117,10 +117,10 @@ impl Lowerer<'_> {
             }
 
             Generics::Dynamic(generics) => {
-                let bounds = self.bounds.add(Bounds::None);
+                let bounds = self.bounds.add(Bound::None);
                 let generic = Ty::Generic(GenericTy {
                     name: ty.name,
-                    bounds,
+                    bound: bounds,
                 });
 
                 generics.push(Generic {
@@ -190,7 +190,7 @@ impl Lowerer<'_> {
         fn recurse_record(
             lowerer: &Lowerer<'_>,
             ty: &RecordTy,
-            infos: &HashMap<Id<Bounds>, BoundsInfo>,
+            infos: &HashMap<Id<Bound>, BoundsInfo>,
         ) -> String {
             let fields = ty
                 .fields
@@ -212,7 +212,7 @@ impl Lowerer<'_> {
         fn recurse_union(
             lowerer: &Lowerer<'_>,
             ty: &UnionTy,
-            infos: &HashMap<Id<Bounds>, BoundsInfo>,
+            infos: &HashMap<Id<Bound>, BoundsInfo>,
         ) -> String {
             ty.variants
                 .iter()
@@ -236,7 +236,7 @@ impl Lowerer<'_> {
         fn recurse(
             lowerer: &Lowerer<'_>,
             ty: &Ty,
-            infos: &HashMap<Id<Bounds>, BoundsInfo>,
+            infos: &HashMap<Id<Bound>, BoundsInfo>,
             precedence: u8,
         ) -> String {
             match ty {
@@ -313,10 +313,10 @@ impl Lowerer<'_> {
                     recurse(self, ty, &infos, 0)
                 } else {
                     match self.bounds[*id] {
-                        Bounds::Numeric(bound) => String::from(bound.as_str()),
-                        Bounds::Record(ref ty) => recurse_record(self, ty, &infos),
-                        Bounds::Union(ref ty) => recurse_union(self, ty, &infos),
-                        Bounds::None => return None,
+                        Bound::Numeric(bound) => String::from(bound.as_str()),
+                        Bound::Record(ref ty) => recurse_record(self, ty, &infos),
+                        Bound::Union(ref ty) => recurse_union(self, ty, &infos),
+                        Bound::None => return None,
                     }
                 };
 
@@ -334,12 +334,12 @@ impl Lowerer<'_> {
         }
     }
 
-    pub(super) fn enumerate_ty_bounds(&self, ty: &Ty) -> HashMap<Id<Bounds>, BoundsInfo> {
+    pub(super) fn enumerate_ty_bounds(&self, ty: &Ty) -> HashMap<Id<Bound>, BoundsInfo> {
         fn recurse_record(
             lowerer: &Lowerer<'_>,
             ty: &RecordTy,
-            seen: &mut Vec<Id<Bounds>>,
-            infos: &mut HashMap<Id<Bounds>, BoundsInfo>,
+            seen: &mut Vec<Id<Bound>>,
+            infos: &mut HashMap<Id<Bound>, BoundsInfo>,
         ) {
             for field in &ty.fields {
                 recurse(lowerer, &field.ty, seen, infos);
@@ -349,8 +349,8 @@ impl Lowerer<'_> {
         fn recurse_union(
             lowerer: &Lowerer<'_>,
             ty: &UnionTy,
-            seen: &mut Vec<Id<Bounds>>,
-            infos: &mut HashMap<Id<Bounds>, BoundsInfo>,
+            seen: &mut Vec<Id<Bound>>,
+            infos: &mut HashMap<Id<Bound>, BoundsInfo>,
         ) {
             for variant in &ty.variants {
                 if let Some(ref ty) = variant.payload {
@@ -361,9 +361,9 @@ impl Lowerer<'_> {
 
         fn recurse_infer(
             lowerer: &Lowerer<'_>,
-            mut id: Id<Bounds>,
-            seen: &mut Vec<Id<Bounds>>,
-            infos: &mut HashMap<Id<Bounds>, BoundsInfo>,
+            mut id: Id<Bound>,
+            seen: &mut Vec<Id<Bound>>,
+            infos: &mut HashMap<Id<Bound>, BoundsInfo>,
         ) {
             let n = infos.len();
 
@@ -389,10 +389,10 @@ impl Lowerer<'_> {
             info.occurences += 1;
 
             match lowerer.bounds[id] {
-                Bounds::Numeric(..) => {}
-                Bounds::Record(ref ty) => recurse_record(lowerer, ty, seen, infos),
-                Bounds::Union(ref ty) => recurse_union(lowerer, ty, seen, infos),
-                Bounds::None => {}
+                Bound::Numeric(..) => {}
+                Bound::Record(ref ty) => recurse_record(lowerer, ty, seen, infos),
+                Bound::Union(ref ty) => recurse_union(lowerer, ty, seen, infos),
+                Bound::None => {}
             }
 
             seen.pop();
@@ -401,15 +401,13 @@ impl Lowerer<'_> {
         fn recurse(
             lowerer: &Lowerer<'_>,
             ty: &Ty,
-            seen: &mut Vec<Id<Bounds>>,
-            infos: &mut HashMap<Id<Bounds>, BoundsInfo>,
+            seen: &mut Vec<Id<Bound>>,
+            infos: &mut HashMap<Id<Bound>, BoundsInfo>,
         ) {
             match ty {
-                Ty::Infer(bounds) | Ty::Generic(GenericTy { bounds, .. }) => {
-                    recurse_infer(lowerer, *bounds, seen, infos)
-                }
+                Ty::Infer(bounds) => recurse_infer(lowerer, *bounds, seen, infos),
 
-                Ty::Numeric(..) | Ty::Str => {}
+                Ty::Numeric(..) | Ty::Str | Ty::Generic(..) => {}
 
                 Ty::Tuple(fields) => {
                     for field in fields {

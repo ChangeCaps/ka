@@ -11,6 +11,8 @@ pub enum Expr {
     Bind(BindExpr),
     Pure(PureExpr),
     Call(CallExpr),
+    With(WithExpr),
+    Field(FieldExpr),
     Lambda(LambdaExpr),
     Variant(VariantExpr),
     Record(RecordExpr),
@@ -62,6 +64,20 @@ pub struct CallExpr {
 }
 
 #[derive(Clone, Debug)]
+pub struct WithExpr {
+    pub input: Box<Expr>,
+    pub fields: Vec<ExprField>,
+    pub ty: Ty,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldExpr {
+    pub input: Box<Expr>,
+    pub name: &'static str,
+    pub ty: Ty,
+}
+
+#[derive(Clone, Debug)]
 pub struct LambdaExpr {
     pub scope: Id<Scope>,
     pub input: Pat,
@@ -108,6 +124,8 @@ pub enum BinOp {
     LtEq,
     Eq,
     Ne,
+    And,
+    Or,
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +161,8 @@ pub enum Intrinsic {
     StringPrepend,
     StringSplitAt,
     StringFind,
+
+    Hash,
 }
 
 impl Expr {
@@ -161,6 +181,8 @@ impl Expr {
             Expr::Bind(expr) => expr.expr.ty(),
             Expr::Pure(expr) => expr.ty.clone(),
             Expr::Call(expr) => expr.ty.clone(),
+            Expr::With(expr) => expr.ty.clone(),
+            Expr::Field(expr) => expr.ty.clone(),
             Expr::Lambda(expr) => expr.ty.clone(),
             Expr::Variant(expr) => expr.ty.clone(),
             Expr::Record(expr) => expr.ty.clone(),
