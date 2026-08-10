@@ -1,9 +1,9 @@
 is ('a -> !'b) -> !'a -> !'b
-let bind f m = do
+bind f m = do
   let x <- m
   f x
 
 is !'b -> !'a -> !'b
-let then second first = do
+then second first = do
   first
   second

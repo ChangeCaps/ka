@@ -12,6 +12,16 @@ pub fn is_pat(token: Token) -> bool {
     )
 }
 
+pub fn pats(parser: &mut Parser) -> Vec<Pat> {
+    let mut args = Vec::new();
+
+    while is_pat(parser.peek()) {
+        args.push(pat(parser));
+    }
+
+    args
+}
+
 pub fn pat(parser: &mut Parser) -> Pat {
     tuple(parser)
 }

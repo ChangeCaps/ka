@@ -1,7 +1,7 @@
 use crate::{
     arena::Id,
     ast,
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, Span},
     ir::{Alias, Bound, Expr, LambdaExpr, Pat, Scope, ScopeKind, Ty, VarKind},
     lower::{
         Lowerer,
@@ -10,50 +10,36 @@ use crate::{
 };
 
 impl Lowerer<'_> {
-    pub(super) fn let_def(
+    pub(super) fn register_let(
         &mut self,
         scope: Id<Scope>,
         kind: VarKind,
-        def: &ast::LetDef,
-    ) -> (Pat, Expr) {
-        let expr = self.complete_let_def(scope, def);
-        let pat = self.register_let_def(scope, kind, def);
-
-        self.unify(&pat.ty(), &expr.ty(), def.span);
-
-        (pat, expr)
-    }
-
-    pub(super) fn register_let_def(
-        &mut self,
-        scope: Id<Scope>,
-        kind: VarKind,
-        def: &ast::LetDef,
+        ty: Option<&ast::Ty>,
+        pat: &ast::Pat,
+        span: Span,
     ) -> Pat {
-        if def.is_bind {
-            let diagnostic = Diagnostic::error("`let` `<-` is only allowed in `do` blocks")
-                .with_label(def.span, "in `let` found here");
+        let pat = self.pat(scope, kind, pat);
 
-            self.emitter.emit(diagnostic);
-        }
-
-        let pat = self.pat(scope, kind, &def.pat);
-
-        if let Some(ref ty) = def.ty {
+        if let Some(ty) = ty {
             let ty = self.ty(scope, &mut Generics::dynamic(), ty);
-            self.unify(&pat.ty(), &ty, def.span);
+            self.unify(&pat.ty(), &ty, span);
         }
 
         pat
     }
 
-    pub(super) fn complete_let_def(&mut self, scope: Id<Scope>, def: &ast::LetDef) -> Expr {
-        if !def.params.is_empty() {
-            let expr = self.let_lambda_def(scope, def);
+    pub(super) fn complete_let(
+        &mut self,
+        scope: Id<Scope>,
+        params: &[ast::Pat],
+        expr: &ast::Expr,
+    ) -> Expr {
+        if !params.is_empty() {
+            let expr = self.lambda(scope, params, expr);
             return expr;
         }
 
-        self.expr(scope, &def.expr)
+        self.expr(scope, expr)
     }
 
     pub(super) fn aliases<'a>(
@@ -117,11 +103,7 @@ impl Lowerer<'_> {
         }
     }
 
-    fn let_lambda_def(&mut self, scope: Id<Scope>, def: &ast::LetDef) -> Expr {
-        self.lambda_def(scope, &def.params, &def.expr)
-    }
-
-    pub(super) fn lambda_def(
+    pub(super) fn lambda(
         &mut self,
         mut scope: Id<Scope>,
         params: &[ast::Pat],

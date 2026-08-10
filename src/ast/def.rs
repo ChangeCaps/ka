@@ -4,15 +4,50 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
+pub enum ModuleDef {
+    Def(Def),
+    Global(GlobalDef),
+}
+
+impl ModuleDef {
+    pub fn as_global(&self) -> Option<&GlobalDef> {
+        match self {
+            Self::Global(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_def(&self) -> Option<&Def> {
+        match self {
+            Self::Def(def) => Some(def),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Def {
     Import(ImportDef),
     Extern(ExternDef),
     Alias(AliasDef),
-    Let(LetDef),
     Error(Span),
 }
 
 impl Def {
+    pub fn as_import(&self) -> Option<&ImportDef> {
+        match self {
+            Self::Import(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_extern(&self) -> Option<&ExternDef> {
+        match self {
+            Self::Extern(def) => Some(def),
+            _ => None,
+        }
+    }
+
     pub fn as_alias(&self) -> Option<&AliasDef> {
         match self {
             Self::Alias(def) => Some(def),
@@ -45,11 +80,10 @@ pub struct AliasDef {
 }
 
 #[derive(Clone, Debug)]
-pub struct LetDef {
+pub struct GlobalDef {
     pub ty: Option<Ty>,
     pub pat: Pat,
     pub params: Vec<Pat>,
-    pub is_bind: bool,
     pub expr: Expr,
     pub span: Span,
 }

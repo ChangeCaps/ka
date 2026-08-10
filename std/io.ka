@@ -5,7 +5,7 @@ extern "io::readln" readln is !str
 extern "io::print" print is str -> !{}
 
 is str -> !{}
-let println s = s |> append "\n" |> print
+println s = s |> append "\n" |> print
 
 is 'a -> !{}
-let debug x = x |> format |> println
+debug x = x |> format |> println

@@ -7,7 +7,7 @@ use crate::{
     arena::{Arena, Id},
     ast,
     diagnostic::{Diagnostic, Emitter, Span},
-    ir::{Alias, Bound, Extern, Global, Import, Pat, Program, Scope, ScopeKind, Ty, Var, VarKind},
+    ir::{Alias, Bound, Extern, Global, Import, Program, Scope, ScopeKind, Ty, Var, VarKind},
     lower::ty::Generics,
 };
 
@@ -25,7 +25,7 @@ pub struct Lowerer<'a> {
     emitter: &'a mut dyn Emitter,
 
     imports: HashMap<&'static str, Id<Scope>>,
-    modules: Vec<(Id<Scope>, Box<[ast::Def]>)>,
+    modules: Vec<(Id<Scope>, Box<[ast::ModuleDef]>)>,
 
     externs: Arena<Extern>,
     globals: Arena<Global>,
@@ -43,7 +43,6 @@ pub struct Lowerer<'a> {
 }
 
 type Dependencies = HashMap<Id<Global>, Vec<(Ty, Span)>>;
-type LetDefState<'a> = (Id<Global>, Id<Scope>, Pat, &'a ast::LetDef);
 
 impl<'a> Lowerer<'a> {
     pub fn new(emitter: &'a mut dyn Emitter) -> Self {
@@ -75,7 +74,7 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    pub fn add_module(&mut self, name: &'static str, defs: Box<[ast::Def]>) -> Id<Scope> {
+    pub fn add_module(&mut self, name: &'static str, defs: Box<[ast::ModuleDef]>) -> Id<Scope> {
         let scope = self.add_scope(ScopeKind::Module, self.prelude);
 
         self.imports.insert(name, scope);
@@ -91,25 +90,29 @@ impl<'a> Lowerer<'a> {
         let modules = mem::take(&mut self.modules);
 
         for (scope, defs) in &modules {
-            self.import_defs(*scope, defs);
+            self.import_defs(*scope, defs.iter().filter_map(ast::ModuleDef::as_def));
         }
 
         self.aliases(modules.iter().flat_map(|(scope, defs)| {
-            iter::repeat(*scope).zip(defs.iter().filter_map(ast::Def::as_alias))
+            let alias_defs = defs
+                .iter()
+                .filter_map(ast::ModuleDef::as_def)
+                .filter_map(ast::Def::as_alias);
+
+            iter::repeat(*scope).zip(alias_defs)
         }));
 
         for (scope, defs) in &modules {
-            self.extern_defs(*scope, defs);
+            self.extern_defs(*scope, defs.iter().filter_map(ast::ModuleDef::as_def));
         }
 
-        let mut let_defs = Vec::new();
+        let global_defs = modules.iter().flat_map(|(scope, defs)| {
+            let global_defs = defs.iter().filter_map(ast::ModuleDef::as_global);
 
-        for (scope, defs) in &modules {
-            let defs = self.register_let_defs(*scope, defs);
-            let_defs.extend(defs);
-        }
+            iter::repeat(*scope).zip(global_defs)
+        });
 
-        self.complete_let_defs(let_defs);
+        self.global_defs(global_defs);
 
         let order = self.resolve_global_dependencies();
 
@@ -207,35 +210,23 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn register_let_defs<'b>(
-        &mut self,
-        scope: Id<Scope>,
-        defs: &'b [ast::Def],
-    ) -> Vec<LetDefState<'b>> {
+    fn global_defs<'b>(&mut self, defs: impl IntoIterator<Item = (Id<Scope>, &'b ast::GlobalDef)>) {
         let mut let_defs = Vec::new();
 
-        for def in defs {
-            let ast::Def::Let(def) = def else {
-                continue;
-            };
-
+        for (scope, def) in defs {
             let global = self.globals.reserve();
 
             let kind = VarKind::Global(global);
-            let pat = self.register_let_def(scope, kind, def);
+            let pat = self.register_let(scope, kind, def.ty.as_ref(), &def.pat, def.span);
 
             let_defs.push((global, scope, pat, def));
         }
 
-        let_defs
-    }
-
-    fn complete_let_defs(&mut self, defs: Vec<LetDefState<'_>>) {
-        for (global, scope, pat, def) in defs {
+        for (global, scope, pat, def) in let_defs {
             let kind = ScopeKind::Global(global);
             let scope = self.add_scope(kind, scope);
 
-            let expr = self.complete_let_def(scope, def);
+            let expr = self.complete_let(scope, &def.params, &def.expr);
             self.unify(&pat.ty(), &expr.ty(), def.span);
 
             self.globals.insert(global, Global { pat, expr });

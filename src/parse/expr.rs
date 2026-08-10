@@ -1,8 +1,8 @@
 use crate::{
     ast::{
-        Arm, BinOp, BinaryExpr, BlockExpr, CallExpr, DoExpr, DoKind, DoStmt, Expr, ExprField,
-        FieldExpr, LambdaExpr, MatchExpr, NamedExpr, NumExpr, ParenExpr, RecordExpr, StrExpr,
-        TupleExpr, VariantExpr, WithExpr,
+        Arm, BinOp, BinaryExpr, BindStmt, BlockExpr, BlockStmt, CallExpr, DoExpr, DoKind, DoStmt,
+        Expr, ExprField, FieldExpr, LambdaExpr, LetStmt, MatchExpr, NamedExpr, NumExpr, ParenExpr,
+        RecordExpr, StrExpr, TupleExpr, VariantExpr, WithExpr,
     },
     lex::Token,
     parse::{self, Parser},
@@ -77,11 +77,11 @@ fn block(parser: &mut Parser) -> Expr {
     parser.expect(Token::Indent);
     parser.take_all(Token::Newline);
 
-    let mut defs = Vec::new();
+    let mut stmts = Vec::new();
 
-    while parse::is_def(parser.peek()) {
-        let def = parse::def(parser);
-        defs.push(def);
+    while is_block_stmt(parser.peek()) {
+        let stmt = block_stmt(parser);
+        stmts.push(stmt);
 
         parser.take_all(Token::Newline);
     }
@@ -93,7 +93,42 @@ fn block(parser: &mut Parser) -> Expr {
     parser.take_all(Token::Newline);
     parser.expect(Token::Dedent);
 
-    Expr::Block(BlockExpr { defs, expr, span })
+    Expr::Block(BlockExpr { stmts, expr, span })
+}
+
+fn is_block_stmt(token: Token) -> bool {
+    matches!(token, Token::Is | Token::Let) || parse::is_def(token)
+}
+
+fn block_stmt(parser: &mut Parser) -> BlockStmt {
+    match parser.peek() {
+        Token::Is | Token::Let => BlockStmt::Let(let_stmt(parser)),
+        _ => BlockStmt::Def(parse::def(parser)),
+    }
+}
+
+fn let_stmt(parser: &mut Parser) -> LetStmt {
+    let ty = parse::is(parser);
+    let span = parser.expect(Token::Let);
+
+    let pat = parse::pat(parser);
+    let params = parse::pats(parser);
+
+    let is_bind = parser.take(Token::LeftArrow);
+
+    if !is_bind {
+        parser.expect(Token::Eq);
+    }
+
+    let expr = parse::expr(parser);
+
+    LetStmt {
+        ty,
+        pat,
+        params,
+        expr,
+        span,
+    }
 }
 
 fn r#do(parser: &mut Parser) -> Expr {
@@ -128,12 +163,51 @@ fn r#do(parser: &mut Parser) -> Expr {
 }
 
 fn stmt(parser: &mut Parser) -> DoStmt {
-    if parse::is_def(parser.peek()) {
-        let def = parse::def(parser);
-        DoStmt::Def(def)
-    } else {
-        let expr = expr(parser);
-        DoStmt::Expr(expr)
+    match parser.peek() {
+        Token::Is | Token::Let => bind_stmt(parser),
+        token if parse::is_def(token) => DoStmt::Def(parse::def(parser)),
+        _ => DoStmt::Expr(expr(parser)),
+    }
+}
+
+fn bind_stmt(parser: &mut Parser) -> DoStmt {
+    let ty = parse::is(parser);
+    let span = parser.expect(Token::Let);
+
+    let pat = parse::pat(parser);
+    let params = parse::pats(parser);
+
+    let is_bind = match parser.peek() {
+        Token::Eq => false,
+        Token::LeftArrow => true,
+
+        _ => {
+            parser.expected("");
+
+            false
+        }
+    };
+
+    parser.consume();
+
+    let expr = parse::expr(parser);
+
+    match is_bind {
+        true => DoStmt::Bind(BindStmt {
+            ty,
+            pat,
+            params,
+            expr,
+            span,
+        }),
+
+        false => DoStmt::Let(LetStmt {
+            ty,
+            pat,
+            params,
+            expr,
+            span,
+        }),
     }
 }
 

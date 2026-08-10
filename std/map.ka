@@ -2,9 +2,6 @@ import "std:option"
 
 import "intrinsic" as intrinsic
 
-is 'a -> nat
-let hash x = intrinsic::hash x
-
 type map 'k 'v = option {
   hash: nat
   key: 'k
@@ -15,14 +12,20 @@ type map 'k 'v = option {
 }
 
 is map 'k 'v
-let empty = :none
+empty = :none
 
 is 'k -> 'v -> map 'k 'v -> map 'k 'v
-let insert key value map =
+insert key value map =
   insert-hashed (hash key) key value map
 
+is 'k -> map 'k 'v -> option 'v
+get key map = get-hashed (hash key) key map
+
+is 'a -> nat
+hash x = intrinsic::hash x
+
 is nat -> 'k -> 'v -> map 'k 'v -> map 'k 'v
-let insert-hashed hash key value map =
+insert-hashed hash key value map =
   match map
     :none -> :some {
       hash: hash
@@ -47,11 +50,8 @@ let insert-hashed hash key value map =
           lhs: insert-hashed hash key value node.lhs
         }
 
-is 'k -> map 'k 'v -> option 'v
-let get key map = get-hashed (hash key) key map
-
 is nat -> 'k -> map 'k 'v -> option 'v
-let get-hashed hash key map =
+get-hashed hash key map =
   match map
     :none -> :none
     :some node -> match node.key == key

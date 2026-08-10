@@ -149,7 +149,7 @@ impl Lowerer<'_> {
     }
 
     fn lambda_expr(&mut self, scope: Id<Scope>, expr: &ast::LambdaExpr) -> Expr {
-        self.lambda_def(scope, &expr.params, &expr.expr)
+        self.lambda(scope, &expr.params, &expr.expr)
     }
 
     fn variant_expr(&mut self, scope: Id<Scope>, expr: &ast::VariantExpr) -> Expr {
@@ -283,17 +283,17 @@ impl Lowerer<'_> {
     fn block_expr(&mut self, scope: Id<Scope>, expr: &ast::BlockExpr) -> Expr {
         let scope = self.add_scope(ScopeKind::Block, scope);
 
-        self.import_defs(scope, &expr.defs);
-        self.alias_defs(scope, &expr.defs);
-        self.extern_defs(scope, &expr.defs);
+        let defs = expr.stmts.iter().filter_map(ast::BlockStmt::as_def);
+
+        self.import_defs(scope, defs.clone());
+        self.alias_defs(scope, defs.clone());
+        self.extern_defs(scope, defs);
 
         let mut exprs = Vec::new();
 
-        for def in &expr.defs {
-            if let ast::Def::Let(def) = def {
-                let (pat, val) = self.let_def(scope, VarKind::Local, def);
-                exprs.push((pat, val));
-            }
+        for def in expr.stmts.iter().filter_map(ast::BlockStmt::as_let) {
+            let (pat, val) = self.let_stmt(scope, VarKind::Local, def);
+            exprs.push((pat, val));
         }
 
         let expr = self.expr(scope, &expr.expr);
@@ -305,6 +305,15 @@ impl Lowerer<'_> {
                 expr: Box::new(expr),
             })
         })
+    }
+
+    fn let_stmt(&mut self, scope: Id<Scope>, kind: VarKind, stmt: &ast::LetStmt) -> (Pat, Expr) {
+        let expr = self.complete_let(scope, &stmt.params, &stmt.expr);
+        let pat = self.register_let(scope, kind, stmt.ty.as_ref(), &stmt.pat, stmt.span);
+
+        self.unify(&pat.ty(), &expr.ty(), stmt.span);
+
+        (pat, expr)
     }
 
     fn do_expr(&mut self, scope: Id<Scope>, expr: &ast::DoExpr) -> Expr {
@@ -330,10 +339,7 @@ impl Lowerer<'_> {
 
         let mut scope = self.add_scope(ScopeKind::Block, scope);
 
-        let defs = stmts.iter().filter_map(|stmt| match stmt {
-            ast::DoStmt::Def(def) => Some(def),
-            ast::DoStmt::Expr(..) => None,
-        });
+        let defs = stmts.iter().filter_map(ast::DoStmt::as_def);
 
         self.import_defs(scope, defs.clone());
         self.alias_defs(scope, defs.clone());
@@ -350,21 +356,15 @@ impl Lowerer<'_> {
             let is_last = i == stmts.len() - 1;
 
             match stmt {
-                ast::DoStmt::Def(def) => {
-                    if let ast::Def::Let(def) = def {
-                        if def.is_bind {
-                            scope = self.add_scope(ScopeKind::Bind, scope);
-                        }
+                ast::DoStmt::Let(stmt) => {
+                    let (pat, expr) = self.let_stmt(scope, VarKind::Local, stmt);
+                    exprs.push(LetOrBind::Let(pat, expr));
+                }
 
-                        let (pat, expr) = self.do_let_def(scope, def);
-
-                        let expr = match def.is_bind {
-                            true => LetOrBind::Bind(scope, pat, expr),
-                            false => LetOrBind::Let(pat, expr),
-                        };
-
-                        exprs.push(expr);
-                    }
+                ast::DoStmt::Bind(stmt) => {
+                    scope = self.add_scope(ScopeKind::Bind, scope);
+                    let (pat, expr) = self.bind_stmt(scope, stmt);
+                    exprs.push(LetOrBind::Bind(scope, pat, expr))
                 }
 
                 ast::DoStmt::Expr(expr) => {
@@ -386,6 +386,8 @@ impl Lowerer<'_> {
                         exprs.push(LetOrBind::Bind(scope, pat, expr))
                     }
                 }
+
+                ast::DoStmt::Def(..) => {}
             }
         }
 
@@ -405,23 +407,19 @@ impl Lowerer<'_> {
         })
     }
 
-    fn do_let_def(&mut self, scope: Id<Scope>, def: &ast::LetDef) -> (Pat, Expr) {
-        if !def.is_bind {
-            return self.let_def(scope, VarKind::Local, def);
-        }
-
-        let expr = self.complete_let_def(scope, def);
-        let pat = self.pat(scope, VarKind::Local, &def.pat);
+    fn bind_stmt(&mut self, scope: Id<Scope>, stmt: &ast::BindStmt) -> (Pat, Expr) {
+        let expr = self.complete_let(scope, &stmt.params, &stmt.expr);
+        let pat = self.pat(scope, VarKind::Local, &stmt.pat);
 
         let ty = self.add_inferred_type();
         let monad_ty = Ty::monad(ty.clone());
 
-        self.unify(&monad_ty, &expr.ty(), def.span);
-        self.unify(&pat.ty(), &ty, def.span);
+        self.unify(&monad_ty, &expr.ty(), stmt.span);
+        self.unify(&pat.ty(), &ty, stmt.span);
 
-        if let Some(ref ty) = def.ty {
+        if let Some(ref ty) = stmt.ty {
             let ty = self.ty(scope, &mut Generics::dynamic(), ty);
-            self.unify(&pat.ty(), &ty, def.span);
+            self.unify(&pat.ty(), &ty, stmt.span);
         }
 
         (pat, expr)

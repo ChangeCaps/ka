@@ -1,16 +1,16 @@
 use crate::{
-    ast::{AliasDef, Def, ExternDef, ImportDef, LetDef, Pat, Ty},
+    ast::{AliasDef, Def, ExternDef, GlobalDef, ImportDef, ModuleDef, Ty},
     lex::Token,
     parse::{self, Parser},
 };
 
-pub fn file(parser: &mut Parser) -> Vec<Def> {
+pub fn file(parser: &mut Parser) -> Vec<ModuleDef> {
     let mut defs = Vec::new();
 
     parser.take_all(Token::Newline);
 
     while !parser.is(Token::Eof) {
-        defs.push(def(parser));
+        defs.push(module_def(parser));
         parser.take_all(Token::Newline);
     }
 
@@ -18,10 +18,43 @@ pub fn file(parser: &mut Parser) -> Vec<Def> {
 }
 
 pub fn is_def(token: Token) -> bool {
-    matches!(
-        token,
-        Token::Is | Token::Let | Token::Type | Token::Extern | Token::Import
-    )
+    matches!(token, Token::Type | Token::Extern | Token::Import)
+}
+
+pub fn module_def(parser: &mut Parser) -> ModuleDef {
+    match parser.peek() {
+        token if is_def(token) => ModuleDef::Def(def(parser)),
+        token if parse::is_pat(token) || token == Token::Is => global(parser),
+
+        _ => {
+            let span = parser.expected("definition");
+            ModuleDef::Def(Def::Error(span))
+        }
+    }
+}
+
+fn global(parser: &mut Parser) -> ModuleDef {
+    let ty = is(parser);
+
+    let pat = parse::pat(parser);
+    let params = parse::pats(parser);
+
+    let is_bind = parser.take(Token::LeftArrow);
+
+    if !is_bind {
+        parser.expect(Token::Eq);
+    }
+
+    let expr = parse::expr(parser);
+    let span = pat.span();
+
+    ModuleDef::Global(GlobalDef {
+        ty,
+        pat,
+        params,
+        expr,
+        span,
+    })
 }
 
 pub fn def(parser: &mut Parser) -> Def {
@@ -29,8 +62,6 @@ pub fn def(parser: &mut Parser) -> Def {
         Token::Extern => r#extern(parser),
         Token::Import => import(parser),
         Token::Type => alias(parser),
-        Token::Is => is(parser),
-        Token::Let => r#let(parser, None),
 
         _ => {
             let span = parser.expected("definition");
@@ -104,45 +135,12 @@ fn alias_params(parser: &mut Parser) -> Vec<Option<&'static str>> {
     args
 }
 
-fn is(parser: &mut Parser) -> Def {
-    parser.expect(Token::Is);
-    let ty = parse::ty(parser);
+pub fn is(parser: &mut Parser) -> Option<Ty> {
+    parser.take(Token::Is).then(|| {
+        let ty = parse::ty(parser);
 
-    parser.take_all(Token::Newline);
+        parser.take_all(Token::Newline);
 
-    r#let(parser, Some(ty))
-}
-
-fn r#let(parser: &mut Parser, ty: Option<Ty>) -> Def {
-    let span = parser.expect(Token::Let);
-
-    let pat = parse::pat(parser);
-    let params = let_params(parser);
-
-    let is_bind = parser.take(Token::LeftArrow);
-
-    if !is_bind {
-        parser.expect(Token::Eq);
-    }
-
-    let expr = parse::expr(parser);
-
-    Def::Let(LetDef {
-        ty,
-        pat,
-        params,
-        is_bind,
-        expr,
-        span,
+        ty
     })
-}
-
-fn let_params(parser: &mut Parser) -> Vec<Pat> {
-    let mut args = Vec::new();
-
-    while parse::is_pat(parser.peek()) {
-        args.push(parse::pat(parser));
-    }
-
-    args
 }

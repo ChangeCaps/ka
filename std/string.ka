@@ -4,30 +4,25 @@ import "std:option"
 import "intrinsic" as intrinsic
 
 is str -> nat
-let length x =
-  intrinsic::string-length x
+length x = intrinsic::string-length x
 
 is 'a -> str
-let format x =
-  intrinsic::string-format x
+format x = intrinsic::string-format x
 
 is str -> str -> str
-let prepend a b =
-  intrinsic::string-prepend (a, b)
+prepend a b = intrinsic::string-prepend (a, b)
 
 is nat -> str -> option (str, str)
-let split-at n s =
-  intrinsic::string-split-at (s, n)
+split-at n s = intrinsic::string-split-at (s, n)
 
 is str -> str -> option nat
-let find needle haystack =
-  intrinsic::string-find (haystack, needle)
+find needle haystack = intrinsic::string-find (haystack, needle)
 
 is str -> str -> str
-let append a b = prepend b a
+append a b = prepend b a
 
 is str -> str -> str
-let trim prefix s =
+trim prefix s =
   match split-at (length prefix) s
     :none -> s
     :some (start, rest) ->
@@ -36,7 +31,7 @@ let trim prefix s =
         :true -> rest
 
 is str -> str -> list str
-let split needle haystack =
+split needle haystack =
   find needle haystack
     |> and-then \n. split-at n haystack
     |> map-some \first, rest.

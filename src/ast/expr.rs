@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Def, Pat},
+    ast::{Def, Pat, Ty},
     diagnostic::Span,
 };
 
@@ -128,8 +128,39 @@ pub enum BinOp {
 
 #[derive(Clone, Debug)]
 pub struct BlockExpr {
-    pub defs: Vec<Def>,
+    pub stmts: Vec<BlockStmt>,
     pub expr: Box<Expr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum BlockStmt {
+    Def(Def),
+    Let(LetStmt),
+}
+
+impl BlockStmt {
+    pub fn as_def(&self) -> Option<&Def> {
+        match self {
+            Self::Def(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_let(&self) -> Option<&LetStmt> {
+        match self {
+            Self::Let(stmt) => Some(stmt),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LetStmt {
+    pub ty: Option<Ty>,
+    pub pat: Pat,
+    pub params: Vec<Pat>,
+    pub expr: Expr,
     pub span: Span,
 }
 
@@ -149,6 +180,26 @@ pub enum DoKind {
 pub enum DoStmt {
     Def(Def),
     Expr(Expr),
+    Let(LetStmt),
+    Bind(BindStmt),
+}
+
+impl DoStmt {
+    pub fn as_def(&self) -> Option<&Def> {
+        match self {
+            Self::Def(def) => Some(def),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BindStmt {
+    pub ty: Option<Ty>,
+    pub pat: Pat,
+    pub params: Vec<Pat>,
+    pub expr: Expr,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]

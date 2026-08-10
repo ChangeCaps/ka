@@ -133,7 +133,7 @@ where
             "{}{} {}:{}:{}",
             " ".repeat(line_number_spaces - 1),
             "-->".blue().bold(),
-            file.name,
+            file.path.display(),
             line,
             column,
         )?;

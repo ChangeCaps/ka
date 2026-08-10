@@ -30,7 +30,7 @@ struct Compiler {
 
 struct Module {
     name: &'static str,
-    ast: Box<[ast::Def]>,
+    ast: Box<[ast::ModuleDef]>,
 }
 
 impl Compiler {
@@ -73,8 +73,7 @@ impl Compiler {
 
     fn add_package(&mut self, name: &str, path: impl AsRef<Path>) -> io::Result<()> {
         let name = format!("{name}:");
-        let path = fs::canonicalize(path)?;
-        self.add_package_dir(&name, &path)
+        self.add_package_dir(&name, path.as_ref())
     }
 
     fn add_package_path(&mut self, parent: &str, path: &Path) -> io::Result<()> {

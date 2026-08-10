@@ -3,13 +3,13 @@ import "std:option"
 type list 'a = option ('a, list 'a)
 
 is list 'a
-let empty = :none
+empty = :none
 
 is 'a -> list 'a -> list 'a
-let push x xs = :some (x, xs)
+push x xs = :some (x, xs)
 
 is ('a -> 'b) -> list 'a -> list 'b
-let map f xs =
+map f xs =
   match xs
     :none -> empty
     :some (x, xs) ->
@@ -18,7 +18,7 @@ let map f xs =
       push x xs
 
 is ('a -> bool) -> list 'a -> list 'a
-let filter f xs =
+filter f xs =
   match xs
     :none -> empty
     :some (x, xs) ->
@@ -28,7 +28,7 @@ let filter f xs =
         :true -> push x xs
 
 is 'acc -> ('acc -> 'a -> 'acc) -> list 'a -> 'acc
-let fold acc f xs =
+fold acc f xs =
   match xs
     :none -> acc
     :some (x, xs) ->
@@ -36,17 +36,17 @@ let fold acc f xs =
       fold acc f xs
 
 is ('a -> 'a -> 'a) -> list 'a -> option 'a
-let reduce f xs =
+reduce f xs =
   xs |> fold (:none) \acc x.
     match acc
       :none -> :some x
       :some x' -> :some f x x'
 
 is list 'a -> nat
-let count xs = xs |> fold 0 \c _. c + 1
+count xs = xs |> fold 0 \c _. c + 1
 
 is nat -> list 'a -> list 'a
-let skip n xs =
+skip n xs =
   match xs
     :none -> :none
     :some (x, xs') ->
@@ -55,7 +55,7 @@ let skip n xs =
         :true -> skip (n - 1) xs'
 
 is nat -> list 'a -> option 'a
-let nth n xs =
+nth n xs =
   match skip n xs
    :some (x, _) -> :some x
    :none -> :none

@@ -1,7 +1,7 @@
 import "std:map"
 import "std:io"
 
-let main =
+main =
   empty
     |> insert "foo" 1
     |> insert "bar" 2
