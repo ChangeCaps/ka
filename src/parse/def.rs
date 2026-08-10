@@ -23,8 +23,15 @@ pub fn is_def(token: Token) -> bool {
 
 pub fn module_def(parser: &mut Parser) -> ModuleDef {
     match parser.peek() {
+        Token::Local if parser.is_nth(1, Token::Type) => {
+            parser.expect(Token::Local);
+            ModuleDef::Def(alias(parser, true))
+        }
+
         token if is_def(token) => ModuleDef::Def(def(parser)),
-        token if parse::is_pat(token) || token == Token::Is => global(parser),
+        token if parse::is_pat(token) || token == Token::Is || token == Token::Local => {
+            global(parser)
+        }
 
         _ => {
             let span = parser.expected("definition");
@@ -36,6 +43,7 @@ pub fn module_def(parser: &mut Parser) -> ModuleDef {
 fn global(parser: &mut Parser) -> ModuleDef {
     let ty = is(parser);
 
+    let is_local = parser.take(Token::Local);
     let pat = parse::pat(parser);
     let params = parse::pats(parser);
 
@@ -49,6 +57,7 @@ fn global(parser: &mut Parser) -> ModuleDef {
     let span = pat.span();
 
     ModuleDef::Global(GlobalDef {
+        is_local,
         ty,
         pat,
         params,
@@ -61,7 +70,7 @@ pub fn def(parser: &mut Parser) -> Def {
     match parser.peek() {
         Token::Extern => r#extern(parser),
         Token::Import => import(parser),
-        Token::Type => alias(parser),
+        Token::Type => alias(parser, false),
 
         _ => {
             let span = parser.expected("definition");
@@ -104,7 +113,7 @@ fn import(parser: &mut Parser) -> Def {
     Def::Import(ImportDef { path, name, span })
 }
 
-fn alias(parser: &mut Parser) -> Def {
+fn alias(parser: &mut Parser, is_local: bool) -> Def {
     let span = parser.expect(Token::Type);
 
     let Some(name) = parser.expect_ident() else {
@@ -118,6 +127,7 @@ fn alias(parser: &mut Parser) -> Def {
     let ty = parse::ty(parser);
 
     Def::Alias(AliasDef {
+        is_local,
         name,
         params,
         ty,

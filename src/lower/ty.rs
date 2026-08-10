@@ -32,11 +32,16 @@ impl Generics<'_> {
 }
 
 impl Lowerer<'_> {
+    pub(super) fn add_inferred_type(&mut self) -> Ty {
+        let id = self.bounds.add(Bound::None);
+        Ty::Infer(id)
+    }
+
     pub(super) fn ty(&mut self, scope: Id<Scope>, generics: &mut Generics, ty: &ast::Ty) -> Ty {
         match ty {
             ast::Ty::Nat => Ty::NAT,
             ast::Ty::Int => Ty::INT,
-            ast::Ty::Num => Ty::NUM,
+            ast::Ty::Real => Ty::REAL,
             ast::Ty::Str => Ty::Str,
 
             ast::Ty::Paren(ty) => self.ty(scope, generics, &ty.ty),
@@ -69,7 +74,7 @@ impl Lowerer<'_> {
             ast::Ty::Union(ty) => self.union_ty(scope, generics, ty),
             ast::Ty::Alias(ty) => self.alias_ty(scope, generics, ty),
 
-            ast::Ty::Error(..) => self.add_inferred_type(),
+            ast::Ty::Error(..) => Ty::Error,
         }
     }
 
@@ -113,7 +118,7 @@ impl Lowerer<'_> {
                     .with_label(ty.span, "found here");
 
                 self.emitter.emit(diagnostic);
-                self.add_inferred_type()
+                Ty::Error
             }
 
             Generics::Dynamic(generics) => {
@@ -139,7 +144,7 @@ impl Lowerer<'_> {
                 .with_label(ty.span, "found here");
 
             self.emitter.emit(diagnostic);
-            return self.add_inferred_type();
+            return Ty::Error;
         };
 
         let args = ty
@@ -154,7 +159,7 @@ impl Lowerer<'_> {
                     .with_label(ty.span, "found here");
 
             self.emitter.emit(diagnostic);
-            return self.add_inferred_type();
+            return Ty::Error;
         }
 
         Ty::Alias(AliasTy { alias, args })
@@ -178,9 +183,12 @@ impl Lowerer<'_> {
                 continue;
             }
 
-            let ty = variant.ty.as_ref().map(|ty| self.ty(scope, generics, ty));
+            let payload = variant
+                .payload
+                .as_ref()
+                .map(|ty| self.ty(scope, generics, ty));
 
-            variants.push(Variant { name, payload: ty });
+            variants.push(Variant { name, payload });
         }
 
         Ty::Union(UnionTy { variants })
@@ -240,6 +248,10 @@ impl Lowerer<'_> {
             precedence: u8,
         ) -> String {
             match ty {
+                Ty::Numeric(numeric) => String::from(numeric.as_str()),
+                Ty::Str => String::from("str"),
+                Ty::Error => String::from("_"),
+
                 Ty::Infer(bounds) => {
                     if let Some(info) = infos.get(bounds) {
                         format!("'{}", info.name)
@@ -252,9 +264,6 @@ impl Lowerer<'_> {
                 Ty::Generic(generic) => {
                     format!("'{}", generic.name)
                 }
-
-                Ty::Numeric(numeric) => String::from(numeric.as_str()),
-                Ty::Str => String::from("str"),
 
                 Ty::Tuple(fields) => {
                     let f = fields
@@ -407,7 +416,7 @@ impl Lowerer<'_> {
             match ty {
                 Ty::Infer(bounds) => recurse_infer(lowerer, *bounds, seen, infos),
 
-                Ty::Numeric(..) | Ty::Str | Ty::Generic(..) => {}
+                Ty::Numeric(..) | Ty::Generic(..) | Ty::Str | Ty::Error => {}
 
                 Ty::Tuple(fields) => {
                     for field in fields {

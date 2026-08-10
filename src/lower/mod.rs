@@ -7,7 +7,10 @@ use crate::{
     arena::{Arena, Id},
     ast,
     diagnostic::{Diagnostic, Emitter, Span},
-    ir::{Alias, Bound, Extern, Global, Import, Program, Scope, ScopeKind, Ty, Var, VarKind},
+    ir::{
+        Alias, Bound, Extern, Global, Import, Program, Scope, ScopeKind, Ty, Var, VarKind,
+        Visibility, Visible,
+    },
     lower::ty::Generics,
 };
 
@@ -206,27 +209,32 @@ impl<'a> Lowerer<'a> {
                 ty,
             });
 
-            self.scopes[scope].vars.push(var);
+            self.scopes[scope].vars.push(Visible::global(var));
         }
     }
 
     fn global_defs<'b>(&mut self, defs: impl IntoIterator<Item = (Id<Scope>, &'b ast::GlobalDef)>) {
-        let mut let_defs = Vec::new();
+        let mut global_defs = Vec::new();
 
         for (scope, def) in defs {
             let global = self.globals.reserve();
 
-            let kind = VarKind::Global(global);
-            let pat = self.register_let(scope, kind, def.ty.as_ref(), &def.pat, def.span);
+            let vis = match def.is_local {
+                true => Visibility::Local,
+                false => Visibility::Global,
+            };
 
-            let_defs.push((global, scope, pat, def));
+            let kind = VarKind::Global(global);
+            let pat = self.pat(scope, vis, kind, &def.pat);
+
+            global_defs.push((global, scope, pat, def));
         }
 
-        for (global, scope, pat, def) in let_defs {
+        for (global, scope, pat, def) in global_defs {
             let kind = ScopeKind::Global(global);
             let scope = self.add_scope(kind, scope);
 
-            let expr = self.complete_let(scope, &def.params, &def.expr);
+            let expr = self.complete_let(scope, def.ty.as_ref(), &def.params, &def.expr, def.span);
             self.unify(&pat.ty(), &expr.ty(), def.span);
 
             self.globals.insert(global, Global { pat, expr });
@@ -242,9 +250,10 @@ impl<'a> Lowerer<'a> {
 
                 for (infer, span) in tys {
                     let mut ty = self.globals[dep].expr.ty();
-                    ty = self.instantiate_generics(ty);
 
-                    if !is_recursive {
+                    if is_recursive {
+                        ty = self.instantiate_generics(ty);
+                    } else {
                         ty = self.instantiate_inferred(ty);
                     }
 

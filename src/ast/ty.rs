@@ -4,7 +4,7 @@ use crate::diagnostic::Span;
 pub enum Ty {
     Nat,
     Int,
-    Num,
+    Real,
     Str,
     Paren(ParenTy),
     Lambda(LambdaTy),
@@ -47,7 +47,7 @@ pub struct UnionTy {
 #[derive(Clone, Debug)]
 pub struct Variant {
     pub name: Option<&'static str>,
-    pub ty: Option<Ty>,
+    pub payload: Option<Ty>,
     pub span: Span,
 }
 

@@ -13,7 +13,7 @@ pub fn is_ty(token: Token) -> bool {
         Token::Ident(..)
             | Token::Nat
             | Token::Int
-            | Token::Num
+            | Token::Real
             | Token::Str
             | Token::Quote
             | Token::Colon
@@ -114,7 +114,11 @@ fn variant(parser: &mut Parser) -> Variant {
     let name = parser.expect_ident();
     let ty = is_ty(parser.peek()).then(|| union(parser));
 
-    Variant { name, ty, span }
+    Variant {
+        name,
+        payload: ty,
+        span,
+    }
 }
 
 fn alias(parser: &mut Parser) -> Ty {
@@ -160,7 +164,7 @@ fn term(parser: &mut Parser) -> Ty {
     match parser.peek() {
         Token::Nat => nat(parser),
         Token::Int => int(parser),
-        Token::Num => num(parser),
+        Token::Real => real(parser),
         Token::Str => str(parser),
 
         Token::Quote => generic(parser),
@@ -197,9 +201,9 @@ fn int(parser: &mut Parser) -> Ty {
     Ty::Int
 }
 
-fn num(parser: &mut Parser) -> Ty {
-    parser.expect(Token::Num);
-    Ty::Num
+fn real(parser: &mut Parser) -> Ty {
+    parser.expect(Token::Real);
+    Ty::Real
 }
 
 fn str(parser: &mut Parser) -> Ty {

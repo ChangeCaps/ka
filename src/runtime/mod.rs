@@ -116,10 +116,10 @@ impl<'a> Value<'a> {
         }
     }
 
-    pub fn as_num(&self) -> f64 {
+    pub fn as_real(&self) -> f64 {
         match self.kind() {
             ValueKind::Num(x) => *x,
-            _ => unreachable!("value is not a num"),
+            _ => unreachable!("value is not a real"),
         }
     }
 
@@ -402,7 +402,7 @@ impl<'a> Runtime<'a> {
             Pat::Wild(..) => {}
 
             Pat::Bind(pat) => match self.program.vars[pat.var].kind {
-                VarKind::Global(..) => {
+                VarKind::Global { .. } => {
                     self.globals.insert(pat.var, value);
                 }
 
@@ -418,7 +418,7 @@ impl<'a> Runtime<'a> {
                     unreachable!();
                 };
 
-                if let Some(ref pat) = pat.pat
+                if let Some(ref pat) = pat.payload
                     && let Some(value) = value
                 {
                     self.assign_pat(frame, pat, value.clone());
@@ -448,7 +448,7 @@ impl<'a> Runtime<'a> {
                     unreachable!();
                 };
 
-                match (pat.pat.as_ref(), value) {
+                match (pat.payload.as_ref(), value) {
                     (Some(inner), Some(value)) => *name == pat.name && self.check_pat(inner, value),
                     (_, _) => *name == pat.name,
                 }
@@ -506,11 +506,11 @@ impl<'a> Runtime<'a> {
         match expr {
             Expr::Value(expr) => match expr.value {
                 ir::Value::Num(x) => Value::num(x),
-                ir::Value::String(ref cow) => Value::str(cow.to_string()),
+                ir::Value::Str(ref cow) => Value::str(cow.to_string()),
             },
 
             Expr::Var(expr) => match self.program.vars[expr.var].kind {
-                VarKind::Global(_) => self.globals.get(&expr.var).unwrap().clone(),
+                VarKind::Global { .. } => self.globals.get(&expr.var).unwrap().clone(),
 
                 VarKind::Extern(id) => {
                     let r#extern = &self.program.externs[id];

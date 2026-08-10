@@ -2,7 +2,7 @@ use crate::{
     diagnostic::Span,
     ir::{
         BindPat, Expr, Global, Intrinsic, IntrinsicExpr, LambdaExpr, Pat, ScopeKind, TuplePat, Ty,
-        Var, VarExpr, VarKind,
+        Var, VarExpr, VarKind, Visible,
     },
     lower::Lowerer,
 };
@@ -145,7 +145,6 @@ impl Lowerer<'_> {
         });
 
         self.globals.insert(global, Global { pat, expr });
-
-        self.scopes[scope].vars.push(var);
+        self.scopes[scope].vars.push(Visible::global(var));
     }
 }

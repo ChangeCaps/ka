@@ -1,5 +1,5 @@
 use crate::{
-    ir::{Alias, Ty},
+    ir::{Alias, Ty, Visible},
     lower::Lowerer,
 };
 
@@ -15,6 +15,8 @@ impl Lowerer<'_> {
             ty,
         });
 
-        self.scopes[self.prelude].aliases.push(alias);
+        self.scopes[self.prelude]
+            .aliases
+            .push(Visible::global(alias));
     }
 }

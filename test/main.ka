@@ -3,14 +3,5 @@ import "std:string"
 import "std:list"
 import "std:map"
 
-count n =
-  match n > 0
-    :false -> :none
-    :true -> push n (count (n - 1))
-
 main = do
-  count 20
-    |> fold empty \map n. insert n n map
-    |> debug
-
   do {}

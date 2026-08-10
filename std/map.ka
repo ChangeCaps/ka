@@ -4,6 +4,7 @@ import "std:bits"
 
 type map 'k 'v = option {
   hash: nat
+
   key: 'k
   value: 'v
 
@@ -30,7 +31,7 @@ is map 'k 'v -> list 'k
 keys map = list map |> list::map \k, _. k
 
 is map 'k 'v -> list ('k, 'v) -> list ('k, 'v)
-extend-list map xs =
+local extend-list map xs =
   match map
     :none -> xs
     :some node -> xs
@@ -43,6 +44,7 @@ insert-hashed hash key value map =
   match map
     :none -> :some {
       hash: hash
+
       key: key
       value: value
 
@@ -88,6 +90,7 @@ remove-hashed hash key map =
 
           :some node with {
             hash: hash
+
             key: key
             value: value
 

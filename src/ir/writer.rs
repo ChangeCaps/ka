@@ -42,7 +42,7 @@ where
         match expr {
             Expr::Value(expr) => match expr.value {
                 Value::Num(x) => write!(self.writer, "{x}")?,
-                Value::String(ref s) => {
+                Value::Str(ref s) => {
                     let s = s.replace('\n', "\\n");
 
                     write!(self.writer, "\"{s}\"")?;
@@ -190,7 +190,7 @@ where
             Pat::Variant(pat) => {
                 write!(self.writer, ":{}", pat.name)?;
 
-                if let Some(ref pat) = pat.pat {
+                if let Some(ref pat) = pat.payload {
                     write!(self.writer, " ")?;
                     self.write_pat(pat)?;
                 }

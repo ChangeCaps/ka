@@ -5,7 +5,7 @@ use crate::{
     ir::{
         Arm, BinOp, BinaryExpr, BindExpr, CallExpr, Expr, ExprField, FieldExpr, LetExpr, MatchExpr,
         Numeric, Pat, PureExpr, RecordExpr, RecordTy, Scope, ScopeKind, TupleExpr, Ty, TyField,
-        Value, ValueExpr, VarExpr, VarKind, VariantExpr, WildPat, WithExpr,
+        Value, ValueExpr, VarExpr, VarKind, VariantExpr, Visibility, WildPat, WithExpr,
     },
     lower::{Generics, Lowerer, exhaust},
 };
@@ -40,14 +40,14 @@ impl Lowerer<'_> {
         let value = Value::Num(expr.number);
 
         let ty = self.add_inferred_type();
-        self.constrain_numeric(&ty, Numeric::Num, expr.span);
+        self.constrain_numeric(&ty, Numeric::Real, expr.span);
 
         Expr::Value(ValueExpr { value, ty })
     }
 
     fn str_expr(&mut self, _scope: Id<Scope>, expr: &ast::StrExpr) -> Expr {
         Expr::Value(ValueExpr {
-            value: Value::String(expr.string.into()),
+            value: Value::Str(expr.string.into()),
             ty: Ty::Str,
         })
     }
@@ -58,14 +58,14 @@ impl Lowerer<'_> {
         };
 
         match self.vars[var].kind {
-            VarKind::Global(target) => {
+            VarKind::Global(global) => {
                 let ty = self.add_inferred_type();
                 let current = self.current_global(scope);
 
                 self.dependencies
                     .entry(current)
                     .or_default()
-                    .entry(target)
+                    .entry(global)
                     .or_default()
                     .push((ty.clone(), expr.span));
 
@@ -84,9 +84,7 @@ impl Lowerer<'_> {
             .with_label(span, "found here");
 
         self.emitter.emit(diagnostic);
-
-        let ty = self.add_inferred_type();
-        Expr::Error(ty)
+        self.error_expr(span)
     }
 
     fn field_expr(&mut self, scope: Id<Scope>, expr: &ast::FieldExpr) -> Expr {
@@ -154,8 +152,7 @@ impl Lowerer<'_> {
 
     fn variant_expr(&mut self, scope: Id<Scope>, expr: &ast::VariantExpr) -> Expr {
         let Some(name) = expr.name else {
-            let ty = self.add_inferred_type();
-            return Expr::Error(ty);
+            return self.error_expr(expr.span);
         };
 
         let span = expr.span;
@@ -217,16 +214,16 @@ impl Lowerer<'_> {
         let ty = match expr.op {
             ast::BinOp::Add | ast::BinOp::Mul | ast::BinOp::Sub => {
                 self.unify(&lhs.ty(), &rhs.ty(), expr.span);
-                self.constrain_numeric(&lhs.ty(), Numeric::Num, expr.span);
+                self.constrain_numeric(&lhs.ty(), Numeric::Real, expr.span);
 
                 lhs.ty()
             }
 
             ast::BinOp::Div => {
                 self.unify(&lhs.ty(), &rhs.ty(), expr.span);
-                self.unify(&lhs.ty(), &Ty::NUM, expr.span);
+                self.unify(&lhs.ty(), &Ty::REAL, expr.span);
 
-                Ty::NUM
+                Ty::REAL
             }
 
             ast::BinOp::Gt | ast::BinOp::Lt | ast::BinOp::GtEq | ast::BinOp::LtEq => {
@@ -308,8 +305,8 @@ impl Lowerer<'_> {
     }
 
     fn let_stmt(&mut self, scope: Id<Scope>, kind: VarKind, stmt: &ast::LetStmt) -> (Pat, Expr) {
-        let expr = self.complete_let(scope, &stmt.params, &stmt.expr);
-        let pat = self.register_let(scope, kind, stmt.ty.as_ref(), &stmt.pat, stmt.span);
+        let expr = self.complete_let(scope, stmt.ty.as_ref(), &stmt.params, &stmt.expr, stmt.span);
+        let pat = self.pat(scope, Visibility::Local, kind, &stmt.pat);
 
         self.unify(&pat.ty(), &expr.ty(), stmt.span);
 
@@ -408,8 +405,8 @@ impl Lowerer<'_> {
     }
 
     fn bind_stmt(&mut self, scope: Id<Scope>, stmt: &ast::BindStmt) -> (Pat, Expr) {
-        let expr = self.complete_let(scope, &stmt.params, &stmt.expr);
-        let pat = self.pat(scope, VarKind::Local, &stmt.pat);
+        let expr = self.complete_let(scope, stmt.ty.as_ref(), &stmt.params, &stmt.expr, stmt.span);
+        let pat = self.pat(scope, Visibility::Local, VarKind::Local, &stmt.pat);
 
         let ty = self.add_inferred_type();
         let monad_ty = Ty::monad(ty.clone());
@@ -439,7 +436,7 @@ impl Lowerer<'_> {
             let scope = self.add_scope(ScopeKind::Block, scope);
 
             let arm = Arm {
-                pat: self.pat(scope, VarKind::Local, &arm.pat),
+                pat: self.pat(scope, Visibility::Local, VarKind::Local, &arm.pat),
                 expr: self.expr(scope, &arm.expr),
             };
 
@@ -520,6 +517,6 @@ impl Lowerer<'_> {
     }
 
     fn error_expr(&mut self, _span: Span) -> Expr {
-        Expr::Error(self.add_inferred_type())
+        Expr::Error(Ty::Error)
     }
 }

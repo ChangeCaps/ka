@@ -4,34 +4,58 @@ use crate::{
     diagnostic::{Diagnostic, Span},
     ir::{
         BindPat, ErrorPat, Pat, Scope, ScopeKind, TuplePat, Ty, UnionTy, Var, VarKind, Variant,
-        VariantPat, WildPat,
+        VariantPat, Visibility, Visible, WildPat,
     },
     lower::Lowerer,
 };
 
 impl Lowerer<'_> {
-    pub(super) fn pat(&mut self, scope: Id<Scope>, kind: VarKind, pat: &ast::Pat) -> Pat {
+    pub(super) fn pat(
+        &mut self,
+        scope: Id<Scope>,
+        vis: Visibility,
+        kind: VarKind,
+        pat: &ast::Pat,
+    ) -> Pat {
         match pat {
-            ast::Pat::Paren(pat) => self.paren_pat(scope, kind, pat),
-            ast::Pat::Wild(pat) => self.wild_pat(scope, kind, pat),
-            ast::Pat::Bind(pat) => self.bind_pat(scope, kind, pat),
-            ast::Pat::Tuple(pat) => self.tuple_pat(scope, kind, pat),
-            ast::Pat::Variant(pat) => self.variant_pat(scope, kind, pat),
+            ast::Pat::Paren(pat) => self.paren_pat(scope, vis, kind, pat),
+            ast::Pat::Wild(pat) => self.wild_pat(scope, vis, kind, pat),
+            ast::Pat::Bind(pat) => self.bind_pat(scope, vis, kind, pat),
+            ast::Pat::Tuple(pat) => self.tuple_pat(scope, vis, kind, pat),
+            ast::Pat::Variant(pat) => self.variant_pat(scope, vis, kind, pat),
             ast::Pat::Error(span) => self.error_pat(*span),
         }
     }
 
-    fn paren_pat(&mut self, scope: Id<Scope>, kind: VarKind, pat: &ast::ParenPat) -> Pat {
-        self.pat(scope, kind, &pat.pat)
+    fn paren_pat(
+        &mut self,
+        scope: Id<Scope>,
+        vis: Visibility,
+        kind: VarKind,
+        pat: &ast::ParenPat,
+    ) -> Pat {
+        self.pat(scope, vis, kind, &pat.pat)
     }
 
-    fn wild_pat(&mut self, _scope: Id<Scope>, _kind: VarKind, pat: &ast::WildPat) -> Pat {
+    fn wild_pat(
+        &mut self,
+        _scope: Id<Scope>,
+        _vis: Visibility,
+        _kind: VarKind,
+        pat: &ast::WildPat,
+    ) -> Pat {
         let ty = self.add_inferred_type();
         let span = pat.span;
         Pat::Wild(WildPat { ty, span })
     }
 
-    fn bind_pat(&mut self, scope: Id<Scope>, kind: VarKind, pat: &ast::BindPat) -> Pat {
+    fn bind_pat(
+        &mut self,
+        scope: Id<Scope>,
+        vis: Visibility,
+        kind: VarKind,
+        pat: &ast::BindPat,
+    ) -> Pat {
         if self.find_var(scope, pat.name).is_some()
             && matches!(self.scopes[scope].kind, ScopeKind::Global(..))
         {
@@ -46,17 +70,23 @@ impl Lowerer<'_> {
             span: pat.span,
         });
 
-        self.scopes[scope].vars.push(var);
+        self.scopes[scope].vars.push(Visible::new(var, vis));
 
         let span = pat.span;
         Pat::Bind(BindPat { var, ty, span })
     }
 
-    fn tuple_pat(&mut self, scope: Id<Scope>, kind: VarKind, pat: &ast::TuplePat) -> Pat {
+    fn tuple_pat(
+        &mut self,
+        scope: Id<Scope>,
+        vis: Visibility,
+        kind: VarKind,
+        pat: &ast::TuplePat,
+    ) -> Pat {
         let fields = pat
             .fields
             .iter()
-            .map(|field| self.pat(scope, kind, field))
+            .map(|field| self.pat(scope, vis, kind, field))
             .collect::<Vec<_>>();
 
         let field_tys = fields.iter().map(|field| field.ty()).collect();
@@ -66,28 +96,37 @@ impl Lowerer<'_> {
         Pat::Tuple(TuplePat { fields, ty, span })
     }
 
-    fn variant_pat(&mut self, scope: Id<Scope>, kind: VarKind, pat: &ast::VariantPat) -> Pat {
+    fn variant_pat(
+        &mut self,
+        scope: Id<Scope>,
+        vis: Visibility,
+        kind: VarKind,
+        pat: &ast::VariantPat,
+    ) -> Pat {
         let Some(name) = pat.name else {
             return self.error_pat(pat.span);
         };
 
         let span = pat.span;
 
-        let pat = pat
+        let payload = pat
             .pat
             .as_ref()
-            .map(|pat| self.pat(scope, kind, pat))
+            .map(|pat| self.pat(scope, vis, kind, pat))
             .map(Box::new);
 
-        let payload = pat.as_ref().map(|pat| pat.ty());
+        let payload_ty = payload.as_deref().map(Pat::ty);
 
         let ty = Ty::Union(UnionTy {
-            variants: vec![Variant { name, payload }],
+            variants: vec![Variant {
+                name,
+                payload: payload_ty,
+            }],
         });
 
         Pat::Variant(VariantPat {
             name,
-            pat,
+            payload,
             ty,
             span,
         })
@@ -102,7 +141,7 @@ impl Lowerer<'_> {
     }
 
     fn error_pat(&mut self, span: Span) -> Pat {
-        let ty = self.add_inferred_type();
+        let ty = Ty::Error;
         Pat::Error(ErrorPat { ty, span })
     }
 }

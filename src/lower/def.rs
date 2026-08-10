@@ -2,7 +2,7 @@ use crate::{
     arena::Id,
     ast,
     diagnostic::{Diagnostic, Span},
-    ir::{Alias, Bound, Expr, LambdaExpr, Pat, Scope, ScopeKind, Ty, VarKind},
+    ir::{Alias, Bound, Expr, LambdaExpr, Scope, ScopeKind, Ty, VarKind, Visibility, Visible},
     lower::{
         Lowerer,
         ty::{Generic, Generics},
@@ -10,36 +10,25 @@ use crate::{
 };
 
 impl Lowerer<'_> {
-    pub(super) fn register_let(
-        &mut self,
-        scope: Id<Scope>,
-        kind: VarKind,
-        ty: Option<&ast::Ty>,
-        pat: &ast::Pat,
-        span: Span,
-    ) -> Pat {
-        let pat = self.pat(scope, kind, pat);
-
-        if let Some(ty) = ty {
-            let ty = self.ty(scope, &mut Generics::dynamic(), ty);
-            self.unify(&pat.ty(), &ty, span);
-        }
-
-        pat
-    }
-
     pub(super) fn complete_let(
         &mut self,
         scope: Id<Scope>,
+        ty: Option<&ast::Ty>,
         params: &[ast::Pat],
         expr: &ast::Expr,
+        span: Span,
     ) -> Expr {
-        if !params.is_empty() {
-            let expr = self.lambda(scope, params, expr);
-            return expr;
+        let expr = match params.is_empty() {
+            true => self.expr(scope, expr),
+            false => self.lambda(scope, params, expr),
+        };
+
+        if let Some(ty) = ty {
+            let ty = self.ty(scope, &mut Generics::dynamic(), ty);
+            self.unify(&ty, &expr.ty(), span);
         }
 
-        self.expr(scope, expr)
+        expr
     }
 
     pub(super) fn aliases<'a>(
@@ -49,11 +38,7 @@ impl Lowerer<'_> {
         let mut aliases = Vec::new();
 
         for (scope, def) in defs {
-            if self.scopes[scope]
-                .aliases
-                .iter()
-                .any(|id| self.aliases[*id].name == def.name)
-            {
+            if self.find_alias(scope, def.name).is_some() {
                 let diagnostic =
                     Diagnostic::error(format!("alias `{}` is already defined", def.name))
                         .with_label(def.span, "here");
@@ -93,7 +78,12 @@ impl Lowerer<'_> {
                 ty: Ty::UNIT,
             });
 
-            self.scopes[scope].aliases.push(alias);
+            let vis = match def.is_local {
+                true => Visibility::Local,
+                false => Visibility::Global,
+            };
+
+            self.scopes[scope].aliases.push(Visible::new(alias, vis));
             aliases.push((scope, generics, alias, def));
         }
 
@@ -117,7 +107,7 @@ impl Lowerer<'_> {
             .iter()
             .map(|pat| {
                 scope = self.add_scope(ScopeKind::Lambda, scope);
-                let pat = self.pat(scope, VarKind::Local, pat);
+                let pat = self.pat(scope, Visibility::Local, VarKind::Local, pat);
                 (scope, pat)
             })
             .collect::<Vec<_>>();

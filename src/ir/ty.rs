@@ -3,6 +3,7 @@ use crate::arena::Id;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
     Str,
+    Error,
     Numeric(Numeric),
     Tuple(Vec<Ty>),
     Record(RecordTy),
@@ -21,7 +22,7 @@ impl Ty {
 
     pub const INT: Self = Self::Numeric(Numeric::Int);
 
-    pub const NUM: Self = Self::Numeric(Numeric::Num);
+    pub const REAL: Self = Self::Numeric(Numeric::Real);
 
     pub fn option(inner: Self) -> Self {
         Self::Union(UnionTy {
@@ -69,7 +70,7 @@ impl Ty {
 pub enum Numeric {
     Nat,
     Int,
-    Num,
+    Real,
 }
 
 impl Numeric {
@@ -77,7 +78,7 @@ impl Numeric {
         match self {
             Numeric::Nat => "nat",
             Numeric::Int => "int",
-            Numeric::Num => "num",
+            Numeric::Real => "real",
         }
     }
 }
@@ -162,7 +163,7 @@ mod tests {
     #[test]
     fn numeric_ordering() {
         assert!(Numeric::Int > Numeric::Nat);
-        assert!(Numeric::Num > Numeric::Nat);
-        assert!(Numeric::Num > Numeric::Int);
+        assert!(Numeric::Real > Numeric::Nat);
+        assert!(Numeric::Real > Numeric::Int);
     }
 }

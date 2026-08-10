@@ -29,7 +29,7 @@ pub struct BindPat {
 #[derive(Clone, Debug)]
 pub struct VariantPat {
     pub name: &'static str,
-    pub pat: Option<Box<Pat>>,
+    pub payload: Option<Box<Pat>>,
     pub ty: Ty,
     pub span: Span,
 }
@@ -69,6 +69,15 @@ impl Pat {
             Pat::Variant(pat) => pat.span,
             Pat::Tuple(pat) => pat.span,
             Pat::Error(pat) => pat.span,
+        }
+    }
+
+    pub fn is_refutable(&self) -> bool {
+        match self {
+            Pat::Wild(..) | Pat::Bind(..) => false,
+            Pat::Variant(pat) => pat.payload.as_deref().is_some_and(Pat::is_refutable),
+            Pat::Tuple(pat) => pat.fields.iter().any(Pat::is_refutable),
+            Pat::Error(..) => false,
         }
     }
 }

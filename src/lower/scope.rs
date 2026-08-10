@@ -1,6 +1,6 @@
 use crate::{
     arena::Id,
-    ir::{Alias, Global, Scope, ScopeKind, Var, VarKind},
+    ir::{Alias, Global, Scope, ScopeKind, Var, VarKind, Visible},
     lower::Lowerer,
 };
 
@@ -42,7 +42,7 @@ impl Lowerer<'_> {
 
     fn find_var_in_import(&self, scope: Id<Scope>, import: &str, name: &str) -> Option<Id<Var>> {
         self.find_import(scope, import)
-            .and_then(|scope| self.find_var(scope, name))
+            .and_then(|scope| self.find_global_var(scope, name))
     }
 
     fn find_or_capture_var(&mut self, scope: Id<Scope>, name: &str) -> Option<Id<Var>> {
@@ -57,7 +57,18 @@ impl Lowerer<'_> {
             .iter()
             .copied()
             .rev()
-            .find(|id| self.vars[*id].name == name)
+            .find(|var| self.vars[var.id].name == name)
+            .map(|var| var.id)
+    }
+
+    fn find_global_var(&self, scope: Id<Scope>, name: &str) -> Option<Id<Var>> {
+        self.scopes[scope]
+            .vars
+            .iter()
+            .copied()
+            .rev()
+            .find(|var| self.vars[var.id].name == name && var.is_global())
+            .map(|var| var.id)
     }
 
     fn capture_var(&mut self, scope: Id<Scope>, name: &str) -> Option<Id<Var>> {
@@ -65,7 +76,7 @@ impl Lowerer<'_> {
 
         self.find_or_capture_var(parent, name).inspect(|&id| {
             if self.vars[id].kind == VarKind::Local {
-                self.scopes[scope].vars.push(id);
+                self.scopes[scope].vars.push(Visible::local(id));
                 self.scopes[scope].captures.push(id);
             }
         })
@@ -76,7 +87,7 @@ impl Lowerer<'_> {
             .imports
             .iter()
             .rev()
-            .find_map(|import| self.find_var(import.scope, name))
+            .find_map(|import| self.find_global_var(import.scope, name))
     }
 
     pub(super) fn resolve_alias(
@@ -88,7 +99,7 @@ impl Lowerer<'_> {
         match import {
             Some(import) => self
                 .find_import(scope, import)
-                .and_then(|scope| self.find_alias(scope, name)),
+                .and_then(|scope| self.find_global_alias(scope, name)),
 
             None => self.find_or_import_alias(scope, name),
         }
@@ -100,24 +111,35 @@ impl Lowerer<'_> {
             .or_else(|| self.find_alias_in_parent(scope, name))
     }
 
-    fn find_alias(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
+    pub(super) fn find_alias(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
         self.scopes[scope]
             .aliases
             .iter()
             .copied()
-            .find(|id| self.aliases[*id].name == name)
+            .find(|var| self.aliases[var.id].name == name)
+            .map(|var| var.id)
+    }
+
+    fn find_global_alias(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
+        self.scopes[scope]
+            .aliases
+            .iter()
+            .copied()
+            .find(|var| self.aliases[var.id].name == name && var.is_global())
+            .map(|var| var.id)
     }
 
     fn find_alias_in_parent(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
         let parent = self.scopes[scope].parent?;
-        self.find_alias(parent, name)
+        self.find_or_import_alias(parent, name)
     }
 
     fn find_imported_alias(&self, scope: Id<Scope>, name: &str) -> Option<Id<Alias>> {
         self.scopes[scope]
             .imports
             .iter()
-            .find_map(|import| self.find_alias(import.scope, name))
+            .rev()
+            .find_map(|import| self.find_global_alias(import.scope, name))
     }
 
     pub(super) fn current_global(&self, scope: Id<Scope>) -> Id<Global> {

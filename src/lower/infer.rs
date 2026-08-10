@@ -6,16 +6,11 @@ use std::{
 use crate::{
     arena::Id,
     diagnostic::{Diagnostic, Span},
-    ir::{AliasTy, Bound, Numeric, RecordTy, Ty, TyField, UnionTy, Variant},
+    ir::{AliasTy, Bound, GenericTy, Numeric, RecordTy, Ty, TyField, UnionTy, Variant},
     lower::Lowerer,
 };
 
 impl Lowerer<'_> {
-    pub(super) fn add_inferred_type(&mut self) -> Ty {
-        let id = self.bounds.add(Bound::None);
-        Ty::Infer(id)
-    }
-
     pub(super) fn constrain_numeric(&mut self, target: &Ty, bound: Numeric, span: Span) {
         if self.try_constrain_numeric(target, bound).is_err() {
             let diagnostic = Diagnostic::error(format!(
@@ -47,15 +42,15 @@ impl Lowerer<'_> {
         &mut self,
         target: &Ty,
         name: &'static str,
-        ty: Option<&Ty>,
+        payload: Option<&Ty>,
         span: Span,
     ) {
-        if self.try_constrain_variant(target, name, ty).is_err() {
+        if self.try_constrain_variant(target, name, payload).is_err() {
             let diagnostic = Diagnostic::error(format!(
                 "type `{}` does not have variant `{}{}`",
                 self.format_ty(target),
                 name,
-                ty.map_or(String::new(), |ty| format!(" {}", self.format_ty(ty))),
+                payload.map_or(String::new(), |ty| format!(" {}", self.format_ty(ty))),
             ))
             .with_label(span, "here");
 
@@ -66,6 +61,10 @@ impl Lowerer<'_> {
     fn try_constrain_numeric(&mut self, target: &Ty, bound: Numeric) -> Result<(), ()> {
         if let Some(target) = self.subst_shallow(target).cloned() {
             return self.try_constrain_numeric(&target, bound);
+        }
+
+        if let Ty::Error = target {
+            return Ok(());
         }
 
         if let Ty::Alias(target) = target {
@@ -101,6 +100,10 @@ impl Lowerer<'_> {
     fn try_constrain_field(&mut self, target: &Ty, name: &'static str, ty: &Ty) -> Result<(), ()> {
         if let Some(target) = self.subst_shallow(target).cloned() {
             return self.try_constrain_field(&target, name, ty);
+        }
+
+        if let Ty::Error = target {
+            return Ok(());
         }
 
         if let Ty::Alias(target) = target {
@@ -155,15 +158,19 @@ impl Lowerer<'_> {
         &mut self,
         target: &Ty,
         name: &'static str,
-        ty: Option<&Ty>,
+        payload: Option<&Ty>,
     ) -> Result<(), ()> {
         if let Some(target) = self.subst_shallow(target).cloned() {
-            return self.try_constrain_variant(&target, name, ty);
+            return self.try_constrain_variant(&target, name, payload);
+        }
+
+        if let Ty::Error = target {
+            return Ok(());
         }
 
         if let Ty::Alias(target) = target {
             let target = self.instantiate_alias(target);
-            self.try_constrain_variant(&target, name, ty)?;
+            self.try_constrain_variant(&target, name, payload)?;
             return Ok(());
         }
 
@@ -173,7 +180,7 @@ impl Lowerer<'_> {
             self.bounds[id] = Bound::Union(UnionTy {
                 variants: vec![Variant {
                     name,
-                    payload: ty.cloned(),
+                    payload: payload.cloned(),
                 }],
             });
 
@@ -184,7 +191,7 @@ impl Lowerer<'_> {
             && let Bound::Union(ref target) = self.bounds[id]
             && let Some(target) = target.get(name)
         {
-            match (target, ty) {
+            match (target, payload) {
                 (Some(target), Some(ty)) => {
                     let target = target.clone();
                     self.try_unify(&target, ty)?;
@@ -203,15 +210,15 @@ impl Lowerer<'_> {
             && let Bound::Union(ref mut target) = self.bounds[id]
             && target.get(name).is_none()
         {
-            let ty = ty.cloned();
-            target.variants.push(Variant { name, payload: ty });
+            let payload = payload.cloned();
+            target.variants.push(Variant { name, payload });
             return Ok(());
         }
 
         if let Ty::Union(target) = target
             && let Some(target) = target.get(name)
         {
-            match (target, ty) {
+            match (target, payload) {
                 (Some(target), Some(ty)) => {
                     self.try_unify(target, ty)?;
                     return Ok(());
@@ -297,6 +304,8 @@ impl Lowerer<'_> {
     fn try_unify_ty_ty(&mut self, lhs: &Ty, rhs: &Ty) -> Result<(), ()> {
         match (lhs, rhs) {
             (Ty::Infer(..), _) | (_, Ty::Infer(..)) => unreachable!(),
+
+            (Ty::Error, _) | (_, Ty::Error) => {}
 
             (Ty::Generic(lhs), Ty::Generic(rhs)) if lhs == rhs => {}
             (Ty::Numeric(lhs), Ty::Numeric(rhs)) if lhs == rhs => {}
@@ -390,18 +399,29 @@ impl Lowerer<'_> {
     pub(super) fn instantiate_generics(&mut self, mut ty: Ty) -> Ty {
         fn recurse(lowerer: &mut Lowerer<'_>, ty: &mut Ty, map: &mut HashMap<Id<Bound>, Ty>) {
             Lowerer::map_ty(ty, |ty| {
-                while let Some(subst) = lowerer.subst_shallow(ty) {
-                    *ty = subst.clone();
+                while let Ty::Infer(bound) | Ty::Generic(GenericTy { bound, .. }) = ty
+                    && let Some(new) = map.get(bound).cloned()
+                {
+                    *ty = new;
+                }
+
+                if let Ty::Infer(bound) = *ty
+                    && let Some(mut subst) = lowerer.subst.get(&bound).cloned()
+                {
+                    let new = lowerer.bounds.add(Bound::None);
+                    map.insert(bound, Ty::Infer(new));
+
+                    recurse(lowerer, &mut subst, map);
+                    lowerer.subst.insert(new, subst);
+
+                    *ty = Ty::Infer(new);
+
+                    return;
                 }
 
                 let Ty::Generic(generic) = ty else {
                     return;
                 };
-
-                if let Some(new) = map.get(&generic.bound).cloned() {
-                    *ty = new;
-                    return;
-                }
 
                 let new = lowerer.bounds.reserve();
                 map.insert(generic.bound, Ty::Infer(new));
@@ -443,7 +463,7 @@ impl Lowerer<'_> {
     fn instantiate_inferred_with(&mut self, mut ty: Ty, mut map: HashMap<Id<Bound>, Ty>) -> Ty {
         fn recurse(lowerer: &mut Lowerer<'_>, ty: &mut Ty, map: &mut HashMap<Id<Bound>, Ty>) {
             Lowerer::map_ty(ty, |ty| {
-                let Ty::Infer(bound) = *ty else {
+                let (Ty::Infer(bound) | Ty::Generic(GenericTy { bound, .. })) = *ty else {
                     return;
                 };
 
@@ -509,7 +529,7 @@ impl Lowerer<'_> {
             f(ty);
 
             match ty {
-                Ty::Infer(..) | Ty::Generic(..) | Ty::Numeric(..) | Ty::Str => {}
+                Ty::Infer(..) | Ty::Generic(..) | Ty::Numeric(..) | Ty::Str | Ty::Error => {}
 
                 Ty::Tuple(fields) => {
                     for field in fields {

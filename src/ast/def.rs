@@ -73,6 +73,7 @@ pub struct ExternDef {
 
 #[derive(Clone, Debug)]
 pub struct AliasDef {
+    pub is_local: bool,
     pub name: &'static str,
     pub params: Vec<Option<&'static str>>,
     pub ty: Ty,
@@ -81,6 +82,7 @@ pub struct AliasDef {
 
 #[derive(Clone, Debug)]
 pub struct GlobalDef {
+    pub is_local: bool,
     pub ty: Option<Ty>,
     pub pat: Pat,
     pub params: Vec<Pat>,

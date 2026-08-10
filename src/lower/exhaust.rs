@@ -52,7 +52,7 @@ impl Lowerer<'_> {
                     if let Pat::Variant(pat) = pat {
                         let pats = variant_pats.entry(pat.name).or_default();
 
-                        if let Some(ref pat) = pat.pat {
+                        if let Some(ref pat) = pat.payload {
                             pats.push(pat);
                         }
                     } else {
@@ -368,8 +368,8 @@ impl Pattern {
             Pat::Wild(..) | Pat::Bind(..) | Pat::Error(..) => Self::Wild,
 
             Pat::Variant(pat) => Self::Cons(Constructor {
-                kind: ConstructorKind::Variant(pat.name, pat.pat.is_some()),
-                fields: pat.pat.as_deref().map(Self::new).into_iter().collect(),
+                kind: ConstructorKind::Variant(pat.name, pat.payload.is_some()),
+                fields: pat.payload.as_deref().map(Self::new).into_iter().collect(),
             }),
 
             Pat::Tuple(pat) => Self::Cons(Constructor {
