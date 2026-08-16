@@ -6,8 +6,8 @@ use crate::{
         Arm, BinOp, BinaryExpr, BindExpr, CallExpr, Expr, ExprField, FieldExpr, LetExpr, MatchExpr,
         Numeric, Pat, PureExpr, RecordExpr, RecordTy, Scope, ScopeKind, TupleExpr, Ty, TyField,
         Value, ValueExpr, VarExpr, VarKind, VariantExpr, Visibility, WildPat, WithExpr,
+        lower::{Generics, Lowerer, exhaust},
     },
-    lower::{Generics, Lowerer, exhaust},
 };
 
 impl Lowerer<'_> {

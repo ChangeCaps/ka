@@ -4,8 +4,8 @@ use ka::{
     ast,
     diagnostic::{Diagnostic, File, Files, Severity},
     intern::Interner,
+    ir::lower::Lowerer,
     lex::Tokens,
-    lower::Lowerer,
     parse::{self, Parser},
     runtime::Runtime,
 };
@@ -66,6 +66,7 @@ impl Compiler {
         }
 
         if let Some(main) = main {
+            let _ = ka::mir::lower::lower(&program, main);
             let mut runtime = Runtime::new(&program);
             runtime.run(main);
         }

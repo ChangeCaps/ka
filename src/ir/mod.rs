@@ -9,6 +9,8 @@ mod value;
 mod var;
 mod writer;
 
+pub mod lower;
+
 pub use expr::*;
 pub use r#extern::*;
 pub use global::*;

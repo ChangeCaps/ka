@@ -1,7 +1,6 @@
 use crate::{
     arena::Id,
-    ir::{Alias, Global, Scope, ScopeKind, Var, VarKind, Visible},
-    lower::Lowerer,
+    ir::{Alias, Global, Scope, ScopeKind, Var, VarKind, Visible, lower::Lowerer},
 };
 
 impl Lowerer<'_> {
@@ -75,10 +74,8 @@ impl Lowerer<'_> {
         let parent = self.scopes[scope].parent?;
 
         self.find_or_capture_var(parent, name).inspect(|&id| {
-            if self.vars[id].kind == VarKind::Local {
-                self.scopes[scope].vars.push(Visible::local(id));
-                self.scopes[scope].captures.push(id);
-            }
+            self.scopes[scope].vars.push(Visible::local(id));
+            self.scopes[scope].captures.push(id);
         })
     }
 

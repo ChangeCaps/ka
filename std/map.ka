@@ -30,7 +30,9 @@ list map = extend-list map (:none)
 is map 'k 'v -> list 'k
 keys map = list map |> list::map \k, _. k
 
-is map 'k 'v -> list ('k, 'v) -> list ('k, 'v)
+is map 'k 'v -> list 'v
+values map = list map |> list::map \_, v. v
+
 local extend-list map xs =
   match map
     :none -> xs
@@ -39,8 +41,7 @@ local extend-list map xs =
       |> extend-list node.rhs
       |> extend-list node.lhs
 
-is nat -> 'k -> 'v -> map 'k 'v -> map 'k 'v
-insert-hashed hash key value map =
+local insert-hashed hash key value map =
   match map
     :none -> :some {
       hash: hash
@@ -66,8 +67,7 @@ insert-hashed hash key value map =
           lhs: insert-hashed hash key value node.lhs
         }
 
-is nat -> 'k -> map 'k 'v -> option 'v
-get-hashed hash key map =
+local get-hashed hash key map =
   map |> option::and-then \node.
     match node.key == key
       :true -> :some node.value
@@ -75,8 +75,7 @@ get-hashed hash key map =
         :true -> get-hashed hash key node.rhs
         :false -> get-hashed hash key node.lhs
 
-is nat -> 'k -> map 'k 'v -> map 'k 'v
-remove-hashed hash key map =
+local remove-hashed hash key map =
   map |> option::and-then \node.
     match node.hash == hash and node.key == key
       :true -> match node.lhs, node.rhs
@@ -106,7 +105,7 @@ remove-hashed hash key map =
           lhs: remove-hashed hash key node.lhs
         }
 
-smallest node =
+local smallest node =
     match node.lhs
       :none -> node.hash, node.key, node.value
       :some lhs -> smallest lhs

@@ -2,10 +2,12 @@ use crate::{
     arena::Id,
     ast,
     diagnostic::{Diagnostic, Span},
-    ir::{Alias, Bound, Expr, LambdaExpr, Scope, ScopeKind, Ty, VarKind, Visibility, Visible},
-    lower::{
-        Lowerer,
-        ty::{Generic, Generics},
+    ir::{
+        Alias, Bound, Expr, LambdaExpr, Scope, ScopeKind, Ty, VarKind, Visibility, Visible,
+        lower::{
+            Lowerer,
+            ty::{Generic, Generics},
+        },
     },
 };
 

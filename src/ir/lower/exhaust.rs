@@ -2,8 +2,7 @@ use std::{collections::HashMap, iter};
 
 use crate::{
     diagnostic::Span,
-    ir::{Pat, Ty, UnionTy, Variant},
-    lower::Lowerer,
+    ir::{Pat, Ty, UnionTy, Variant, lower::Lowerer},
 };
 
 impl Lowerer<'_> {

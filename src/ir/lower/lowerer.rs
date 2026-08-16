@@ -9,20 +9,9 @@ use crate::{
     diagnostic::{Diagnostic, Emitter, Span},
     ir::{
         Alias, Bound, Extern, Global, Import, Program, Scope, ScopeKind, Ty, Var, VarKind,
-        Visibility, Visible,
+        Visibility, Visible, lower::ty::Generics,
     },
-    lower::ty::Generics,
 };
-
-mod def;
-mod exhaust;
-mod expr;
-mod infer;
-mod intrinsic;
-mod pat;
-mod prelude;
-mod scope;
-mod ty;
 
 pub struct Lowerer<'a> {
     emitter: &'a mut dyn Emitter,

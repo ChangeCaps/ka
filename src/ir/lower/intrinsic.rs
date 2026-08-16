@@ -2,9 +2,8 @@ use crate::{
     diagnostic::Span,
     ir::{
         BindPat, Expr, Global, Intrinsic, IntrinsicExpr, LambdaExpr, Pat, ScopeKind, TuplePat, Ty,
-        Var, VarExpr, VarKind, Visible,
+        Var, VarExpr, VarKind, Visible, lower::Lowerer,
     },
-    lower::Lowerer,
 };
 
 impl Lowerer<'_> {

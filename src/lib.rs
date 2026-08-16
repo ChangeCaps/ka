@@ -4,6 +4,6 @@ pub mod diagnostic;
 pub mod intern;
 pub mod ir;
 pub mod lex;
-pub mod lower;
+pub mod mir;
 pub mod parse;
 pub mod runtime;

@@ -4,9 +4,8 @@ use crate::{
     diagnostic::{Diagnostic, Span},
     ir::{
         BindPat, ErrorPat, Pat, Scope, ScopeKind, TuplePat, Ty, UnionTy, Var, VarKind, Variant,
-        VariantPat, Visibility, Visible, WildPat,
+        VariantPat, Visibility, Visible, WildPat, lower::Lowerer,
     },
-    lower::Lowerer,
 };
 
 impl Lowerer<'_> {

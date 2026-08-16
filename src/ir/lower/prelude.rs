@@ -1,7 +1,4 @@
-use crate::{
-    ir::{Alias, Ty, Visible},
-    lower::Lowerer,
-};
+use crate::ir::{Alias, Ty, Visible, lower::Lowerer};
 
 impl Lowerer<'_> {
     pub(super) fn add_prelude(&mut self) {

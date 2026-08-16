@@ -4,8 +4,9 @@ use crate::{
     arena::Id,
     ast,
     diagnostic::Diagnostic,
-    ir::{AliasTy, Bound, GenericTy, RecordTy, Scope, Ty, TyField, UnionTy, Variant},
-    lower::Lowerer,
+    ir::{
+        AliasTy, Bound, GenericTy, RecordTy, Scope, Ty, TyField, UnionTy, Variant, lower::Lowerer,
+    },
 };
 
 pub(super) enum Generics<'a> {

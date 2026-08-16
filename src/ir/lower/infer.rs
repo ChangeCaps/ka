@@ -6,8 +6,9 @@ use std::{
 use crate::{
     arena::Id,
     diagnostic::{Diagnostic, Span},
-    ir::{AliasTy, Bound, GenericTy, Numeric, RecordTy, Ty, TyField, UnionTy, Variant},
-    lower::Lowerer,
+    ir::{
+        AliasTy, Bound, GenericTy, Numeric, RecordTy, Ty, TyField, UnionTy, Variant, lower::Lowerer,
+    },
 };
 
 impl Lowerer<'_> {
