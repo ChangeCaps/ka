@@ -3,13 +3,11 @@ import "std:list" as list
 import "std:hash"
 
 type map 'k 'v = option {
-  hash: nat
-
-  key: 'k
+  hash:  nat
+  key:   'k
   value: 'v
-
-  lhs: map 'k 'v
-  rhs: map 'k 'v
+  lhs:   map 'k 'v
+  rhs:   map 'k 'v
 }
 
 is map 'k 'v
