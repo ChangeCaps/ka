@@ -109,7 +109,7 @@ impl RecordTy {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GenericTy {
     pub name: &'static str,
     pub bound: Id<Bound>,
@@ -144,7 +144,7 @@ pub struct AliasTy {
 #[derive(Clone, Debug)]
 pub struct Alias {
     pub name: &'static str,
-    pub params: Vec<Id<Bound>>,
+    pub params: Vec<GenericTy>,
     pub ty: Ty,
 }
 

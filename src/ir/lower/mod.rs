@@ -9,7 +9,7 @@ mod scope;
 mod ty;
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     iter, mem,
 };
 
@@ -141,6 +141,7 @@ impl<'a> Lowerer<'a> {
             scopes: self.scopes,
             vars: self.vars,
 
+            aliases: self.aliases,
             bounds: self.bounds,
             subst: self.subst,
         };
@@ -241,81 +242,54 @@ impl<'a> Lowerer<'a> {
     }
 
     fn resolve_global_dependencies(&mut self) -> Vec<Id<Global>> {
-        let dependencies = mem::take(&mut self.dependencies);
+        fn recurse(
+            lowerer: &mut Lowerer<'_>,
+            global: Id<Global>,
+            rec: &mut HashSet<Id<Global>>,
+            stack: &mut Vec<Id<Global>>,
+            order: &mut Vec<Id<Global>>,
+        ) {
+            stack.push(global);
 
-        for (global, deps) in &dependencies {
-            for (&dep, tys) in deps {
-                let is_recursive = Self::depends_on(&dependencies, dep, *global);
+            for (dependency, tys) in lowerer.dependencies.remove(&global).into_iter().flatten() {
+                recurse(lowerer, dependency, rec, stack, order);
+
+                if let Some(i) = stack.iter().rposition(|x| *x == global) {
+                    for global in stack[i..].iter().copied() {
+                        rec.insert(global);
+                    }
+                }
+
+                let is_recursive = rec.contains(&global);
 
                 for (infer, span) in tys {
-                    let mut ty = self.globals[dep].expr.ty();
+                    let mut ty = lowerer.globals[dependency].expr.ty();
 
                     if is_recursive {
-                        ty = self.instantiate_generics(ty);
+                        ty = lowerer.instantiate_generics(ty);
                     } else {
-                        ty = self.instantiate_inferred(ty);
+                        ty = lowerer.instantiate_inferred(ty);
                     }
 
-                    self.unify(infer, &ty, *span);
+                    lowerer.unify(&infer, &ty, span);
                 }
             }
+
+            stack.pop();
+
+            if !order.contains(&global) {
+                order.push(global);
+            }
         }
 
-        fn recurse(
-            global: Id<Global>,
-            seen: &mut HashSet<Id<Global>>,
-            order: &mut Vec<Id<Global>>,
-            dependencies: &HashMap<Id<Global>, Dependencies>,
-        ) {
-            if !seen.insert(global) {
-                return;
-            }
-
-            for (dependency, _) in dependencies.get(&global).into_iter().flatten() {
-                recurse(*dependency, seen, order, dependencies);
-            }
-
-            order.push(global);
-        }
-
-        let mut seen = HashSet::new();
+        let mut rec = HashSet::new();
+        let mut stack = Vec::new();
         let mut order = Vec::new();
 
-        for global in self.globals.keys() {
-            recurse(global, &mut seen, &mut order, &dependencies);
+        for global in self.globals.keys().collect::<Vec<_>>() {
+            recurse(self, global, &mut rec, &mut stack, &mut order);
         }
 
         order
-    }
-
-    fn depends_on(
-        dependencies: &HashMap<Id<Global>, Dependencies>,
-        a: Id<Global>,
-        b: Id<Global>,
-    ) -> bool {
-        let mut seen = HashSet::new();
-        let mut stack = VecDeque::new();
-        stack.push_back(a);
-
-        while let Some(x) = stack.pop_front() {
-            if !seen.insert(x) {
-                continue;
-            }
-
-            if x == b {
-                return true;
-            }
-
-            for dependency in dependencies
-                .get(&x)
-                .iter()
-                .flat_map(|deps| deps.keys())
-                .copied()
-            {
-                stack.push_back(dependency);
-            }
-        }
-
-        false
     }
 }

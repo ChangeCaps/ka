@@ -16,6 +16,7 @@ pub enum Expr {
     Lambda(LambdaExpr),
     Variant(VariantExpr),
     Record(RecordExpr),
+    Unary(UnaryExpr),
     Binary(BinaryExpr),
     Tuple(TupleExpr),
     Match(MatchExpr),
@@ -105,6 +106,21 @@ pub struct ExprField {
 }
 
 #[derive(Clone, Debug)]
+pub struct UnaryExpr {
+    pub op: UnOp,
+    pub input: Box<Expr>,
+    pub ty: Ty,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum UnOp {
+    Nat,
+    Int,
+    Real,
+    Not,
+}
+
+#[derive(Clone, Debug)]
 pub struct BinaryExpr {
     pub op: BinOp,
     pub lhs: Box<Expr>,
@@ -120,8 +136,8 @@ pub enum BinOp {
     Div,
     Gt,
     Lt,
-    GtEq,
-    LtEq,
+    Ge,
+    Le,
     Eq,
     Ne,
     And,
@@ -156,13 +172,23 @@ pub struct IntrinsicExpr {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Intrinsic {
-    StringLength,
-    StringFormat,
-    StringPrepend,
-    StringSplitAt,
-    StringFind,
+    Dynamic,
 
-    Hash,
+    FormatNat,
+    FormatInt,
+    FormatReal,
+
+    HashStr,
+    HashNat,
+    HashInt,
+    HashReal,
+
+    NatXor,
+
+    StrLength,
+    StrPrepend,
+    StrSplitAt,
+    StrFind,
 }
 
 impl Expr {
@@ -186,6 +212,7 @@ impl Expr {
             Expr::Lambda(expr) => expr.ty.clone(),
             Expr::Variant(expr) => expr.ty.clone(),
             Expr::Record(expr) => expr.ty.clone(),
+            Expr::Unary(expr) => expr.ty.clone(),
             Expr::Binary(expr) => expr.ty.clone(),
             Expr::Tuple(expr) => expr.ty.clone(),
             Expr::Match(expr) => expr.ty.clone(),

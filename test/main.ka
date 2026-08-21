@@ -1,7 +1,11 @@
 import "std:io"
-import "std:string"
-import "std:list"
-import "std:map"
+import "std:map" as map
 
 main = do
+  map::empty
+    |> map::insert "hello" 0
+    |> map::insert "hel" 0
+    |> map::insert "el" 0
+    |> debug
+
   do {}

@@ -269,7 +269,7 @@ impl Lowerer<'_> {
                 Ty::Tuple(fields) => {
                     let f = fields
                         .iter()
-                        .map(|field| recurse(lowerer, field, infos, 0))
+                        .map(|field| recurse(lowerer, field, infos, 1))
                         .collect::<Vec<_>>()
                         .join(", ");
 

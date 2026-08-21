@@ -1,6 +1,6 @@
 import "std:option" as option
 import "std:list" as list
-import "std:bits"
+import "std:hash"
 
 type map 'k 'v = option {
   hash: nat

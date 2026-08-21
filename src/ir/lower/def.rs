@@ -3,7 +3,8 @@ use crate::{
     ast,
     diagnostic::{Diagnostic, Span},
     ir::{
-        Alias, Bound, Expr, LambdaExpr, Scope, ScopeKind, Ty, VarKind, Visibility, Visible,
+        Alias, Bound, Expr, GenericTy, LambdaExpr, Scope, ScopeKind, Ty, VarKind, Visibility,
+        Visible,
         lower::{
             Lowerer,
             ty::{Generic, Generics},
@@ -53,8 +54,7 @@ impl Lowerer<'_> {
             let mut params = Vec::new();
 
             for param in &def.params {
-                let bounds = self.bounds.add(Bound::None);
-                params.push(bounds);
+                let bound = self.bounds.add(Bound::None);
 
                 let Some(name) = param else {
                     continue;
@@ -69,7 +69,10 @@ impl Lowerer<'_> {
                     continue;
                 }
 
-                let ty = Ty::Infer(bounds);
+                let generic = GenericTy { name, bound };
+                let ty = Ty::Generic(generic);
+
+                params.push(generic);
                 generics.push(Generic { name, ty });
             }
 

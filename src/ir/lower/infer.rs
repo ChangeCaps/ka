@@ -380,8 +380,8 @@ impl Lowerer<'_> {
         let mut ty = self.aliases[ty.alias].ty.clone();
 
         Self::map_ty(&mut ty, |ty| {
-            if let Ty::Infer(bound) = ty
-                && let Some(subst) = map.get(bound)
+            if let Ty::Generic(generic) = ty
+                && let Some(subst) = map.get(generic)
             {
                 *ty = subst.clone();
             }

@@ -1,4 +1,4 @@
-use std::{ffi, fs, io, path::Path};
+use std::{ffi, fs, io, path::Path, time::Instant};
 
 use ka::{
     ast,
@@ -7,14 +7,17 @@ use ka::{
     ir::lower::Lowerer,
     lex::Tokens,
     parse::{self, Parser},
-    runtime::Runtime,
 };
 
 fn main() -> io::Result<()> {
     let mut compiler = Compiler::new();
 
+    let t = Instant::now();
+
     compiler.add_package("test", "test")?;
     compiler.add_package("std", "std")?;
+
+    eprintln!("parsing took: {:?}", t.elapsed());
 
     compiler.run("test");
 
@@ -50,6 +53,8 @@ impl Compiler {
             panic!("main module not found");
         }
 
+        let t = Instant::now();
+
         let mut lowerer = Lowerer::new(&mut self.emitter);
 
         for module in self.modules {
@@ -57,6 +62,8 @@ impl Compiler {
         }
 
         let (program, main) = lowerer.finish(&main_module);
+
+        eprintln!("ir lowering took: {:?}", t.elapsed());
 
         let mut writer = ka::diagnostic::Writer::new(io::stderr(), &self.files);
         writer.write_report(&self.emitter).unwrap();
@@ -66,9 +73,22 @@ impl Compiler {
         }
 
         if let Some(main) = main {
-            let _ = ka::mir::lower::lower(&program, main);
-            let mut runtime = Runtime::new(&program);
-            runtime.run(main);
+            let t = Instant::now();
+
+            let entry = ka::mir::lower::lower(&program, main);
+
+            eprintln!("mir lowering took: {:?}", t.elapsed());
+
+            ka::mir::write(io::stderr(), &entry).unwrap();
+
+            println!();
+            println!();
+
+            let t = Instant::now();
+
+            ka::runtime::run(&entry);
+
+            eprintln!("running: {:?}", t.elapsed());
         }
     }
 

@@ -1,22 +1,61 @@
-import "std:list"
+import "std:list" as list
 import "std:option"
+import "std:dynamic"
 
 import "intrinsic" as intrinsic
 
 is str -> nat
-length x = intrinsic::string-length x
+length x = intrinsic::str-length x
 
 is 'a -> str
-format x = intrinsic::string-format x
+format x = format-dynamic 0 (dynamic x)
+
+local format-dynamic p x =
+  let paren p p' s =
+    match p > p'
+      :true -> s |> prepend "(" |> append ")"
+      :false -> s
+
+  match x
+    :str' s -> s
+    :nat' x -> intrinsic::format-nat x
+    :int' x -> intrinsic::format-int x
+    :real' x -> intrinsic::format-real x
+
+    :lambda -> "lambda"
+    :action -> "action"
+
+    :record xs ->
+      match xs
+        :none -> "{}"
+        :some _ -> xs
+          |> list::map \n, x. n
+            |> append ": "
+            |> append (format-dynamic 0 x)
+          |> join "; "
+          |> prepend "{ "
+          |> append " }"
+
+    :tuple xs -> xs
+      |> list::map (format-dynamic 1)
+      |> join ", "
+      |> paren p 0
+
+    :variant (name, x) ->
+      name
+        |> prepend ":"
+        |> append " "
+        |> append (format-dynamic 1 x)
+        |> paren p 1
 
 is str -> str -> str
-prepend a b = intrinsic::string-prepend (a, b)
+prepend a b = intrinsic::str-prepend (a, b)
 
 is nat -> str -> option (str, str)
-split-at n s = intrinsic::string-split-at (s, n)
+split-at n s = intrinsic::str-split-at (s, n)
 
 is str -> str -> option nat
-find needle haystack = intrinsic::string-find (haystack, needle)
+find needle haystack = intrinsic::str-find (haystack, needle)
 
 is str -> str -> str
 append a b = prepend b a
@@ -39,3 +78,14 @@ split needle haystack =
         |> split needle
         |> push first
     |> some-or (empty |> push haystack)
+
+is str -> list str -> str
+join sep xs =
+  match xs
+    :none -> ""
+    :some (x, xs) ->
+      match xs
+        :none -> x
+        :some _ -> x
+          |> append sep
+          |> append (join sep xs)

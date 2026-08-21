@@ -74,8 +74,10 @@ impl Lowerer<'_> {
         let parent = self.scopes[scope].parent?;
 
         self.find_or_capture_var(parent, name).inspect(|&id| {
-            self.scopes[scope].vars.push(Visible::local(id));
-            self.scopes[scope].captures.push(id);
+            if self.vars[id].kind == VarKind::Local {
+                self.scopes[scope].vars.push(Visible::local(id));
+                self.scopes[scope].captures.push(id);
+            }
         })
     }
 

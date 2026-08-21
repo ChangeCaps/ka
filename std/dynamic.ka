@@ -1,0 +1,17 @@
+import "std:list"
+
+import "intrinsic" as intrinsic
+
+type dynamic =
+  | :lambda
+  | :action
+  | :nat' nat
+  | :int' int
+  | :real' real
+  | :str' str
+  | :tuple list dynamic
+  | :record list (str, dynamic)
+  | :variant (str, dynamic)
+
+is 'a -> dynamic
+dynamic x = intrinsic::dynamic x

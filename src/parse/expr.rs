@@ -2,7 +2,7 @@ use crate::{
     ast::{
         Arm, BinOp, BinaryExpr, BindStmt, BlockExpr, BlockStmt, CallExpr, DoExpr, DoKind, DoStmt,
         Expr, ExprField, FieldExpr, LambdaExpr, LetStmt, MatchExpr, NamedExpr, NumExpr, ParenExpr,
-        RecordExpr, StrExpr, TupleExpr, VariantExpr, WithExpr,
+        RecordExpr, StrExpr, TupleExpr, UnOp, UnaryExpr, VariantExpr, WithExpr,
     },
     lex::Token,
     parse::{self, Parser},
@@ -14,6 +14,9 @@ pub fn is_expr(token: Token) -> bool {
         Token::Ident(..)
             | Token::String(..)
             | Token::Number(..)
+            | Token::Nat
+            | Token::Int
+            | Token::Real
             | Token::Do
             | Token::Colon
             | Token::Back
@@ -387,7 +390,7 @@ fn call(parser: &mut Parser) -> Expr {
 }
 
 fn with(parser: &mut Parser) -> Expr {
-    let expr = field(parser);
+    let expr = unary(parser);
 
     if !parser.take(Token::With) {
         return expr;
@@ -405,6 +408,25 @@ fn with(parser: &mut Parser) -> Expr {
         fields,
         span,
     })
+}
+
+fn unary(parser: &mut Parser) -> Expr {
+    let op = match parser.peek() {
+        Token::Nat => UnOp::Nat,
+        Token::Int => UnOp::Int,
+        Token::Real => UnOp::Real,
+
+        _ => return field(parser),
+    };
+
+    let span = parser.consume();
+
+    let input = unary(parser);
+    let input = Box::new(input);
+
+    let span = span.join(input.span());
+
+    Expr::Unary(UnaryExpr { op, input, span })
 }
 
 fn field(parser: &mut Parser) -> Expr {

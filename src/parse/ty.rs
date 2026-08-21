@@ -3,6 +3,7 @@ use crate::{
         AliasTy, GenericTy, LambdaTy, MonadTy, ParenTy, RecordTy, TupleTy, Ty, TyField, UnionTy,
         Variant,
     },
+    diagnostic::Span,
     lex::Token,
     parse::Parser,
 };
@@ -122,23 +123,9 @@ fn variant(parser: &mut Parser) -> Variant {
 }
 
 fn alias(parser: &mut Parser) -> Ty {
-    let Token::Ident(mut name) = parser.peek() else {
+    let Some((import, name, span)) = name(parser) else {
         return term(parser);
     };
-
-    let mut import = None;
-    let span = parser.consume();
-
-    if parser.take(Token::ColonColon) {
-        import = Some(name);
-
-        let span = span.join(parser.span());
-        let Some(actual_name) = parser.expect_ident() else {
-            return Ty::Error(span);
-        };
-
-        name = actual_name;
-    }
 
     let args = alias_args(parser);
 
@@ -154,10 +141,39 @@ fn alias_args(parser: &mut Parser) -> Vec<Ty> {
     let mut args = Vec::new();
 
     while is_ty(parser.peek()) {
-        args.push(term(parser));
+        let arg = match name(parser) {
+            Some((import, name, span)) => Ty::Alias(AliasTy {
+                import,
+                name,
+                args: Vec::new(),
+                span,
+            }),
+
+            None => term(parser),
+        };
+
+        args.push(arg);
     }
 
     args
+}
+
+fn name(parser: &mut Parser) -> Option<(Option<&'static str>, &'static str, Span)> {
+    let Token::Ident(name) = parser.peek() else {
+        return None;
+    };
+
+    let span = parser.consume();
+
+    if parser.take(Token::ColonColon) {
+        let import = Some(name);
+        let span = span.join(parser.span());
+        let name = parser.expect_ident()?;
+
+        Some((import, name, span))
+    } else {
+        Some((None, name, span))
+    }
 }
 
 fn term(parser: &mut Parser) -> Ty {

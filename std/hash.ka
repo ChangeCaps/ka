@@ -1,0 +1,28 @@
+import "std:list"
+import "std:dynamic"
+
+import "intrinsic" as intrinsic
+
+is nat -> nat -> nat
+xor x y = intrinsic::nat-xor (x, y)
+
+is 'a -> nat
+hash x =
+  match dynamic x
+    :lambda -> hash 0
+    :action -> hash 1
+
+    :str' x -> intrinsic::hash-str x
+    :nat' x -> intrinsic::hash-nat x
+    :int' x -> intrinsic::hash-int x
+    :real' x -> intrinsic::hash-real x
+
+    :tuple xs -> xs
+      |> map hash
+      |> fold 0 xor
+
+    :record xs -> xs
+      |> map \_, x. hash x
+      |> fold 0 xor
+
+    :variant (n, x) -> xor (hash n) (hash x)

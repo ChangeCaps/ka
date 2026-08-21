@@ -5,7 +5,8 @@ use crate::{
     ir::{
         Arm, BinOp, BinaryExpr, BindExpr, CallExpr, Expr, ExprField, FieldExpr, LetExpr, MatchExpr,
         Numeric, Pat, PureExpr, RecordExpr, RecordTy, Scope, ScopeKind, TupleExpr, Ty, TyField,
-        Value, ValueExpr, VarExpr, VarKind, VariantExpr, Visibility, WildPat, WithExpr,
+        UnOp, UnaryExpr, Value, ValueExpr, VarExpr, VarKind, VariantExpr, Visibility, WildPat,
+        WithExpr,
         lower::{Generics, Lowerer, exhaust},
     },
 };
@@ -23,6 +24,7 @@ impl Lowerer<'_> {
             ast::Expr::Lambda(expr) => self.lambda_expr(scope, expr),
             ast::Expr::Variant(expr) => self.variant_expr(scope, expr),
             ast::Expr::Record(expr) => self.record_expr(scope, expr),
+            ast::Expr::Unary(expr) => self.unary_expr(scope, expr),
             ast::Expr::Binary(expr) => self.binary_expr(scope, expr),
             ast::Expr::Tuple(expr) => self.tuple_expr(scope, expr),
             ast::Expr::Block(expr) => self.block_expr(scope, expr),
@@ -204,6 +206,42 @@ impl Lowerer<'_> {
         Expr::Record(RecordExpr { fields, ty })
     }
 
+    fn unary_expr(&mut self, scope: Id<Scope>, expr: &ast::UnaryExpr) -> Expr {
+        let input = self.expr(scope, &expr.input);
+        let input = Box::new(input);
+
+        let ty = match expr.op {
+            ast::UnOp::Nat => {
+                self.constrain_numeric(&input.ty(), Numeric::Real, expr.span);
+                Ty::NAT
+            }
+
+            ast::UnOp::Int => {
+                self.constrain_numeric(&input.ty(), Numeric::Real, expr.span);
+                Ty::INT
+            }
+
+            ast::UnOp::Real => {
+                self.constrain_numeric(&input.ty(), Numeric::Real, expr.span);
+                Ty::REAL
+            }
+
+            ast::UnOp::Not => {
+                self.unify(&input.ty(), &Ty::bool(), expr.span);
+                Ty::bool()
+            }
+        };
+
+        let op = match expr.op {
+            ast::UnOp::Nat => UnOp::Nat,
+            ast::UnOp::Int => UnOp::Int,
+            ast::UnOp::Real => UnOp::Real,
+            ast::UnOp::Not => UnOp::Not,
+        };
+
+        Expr::Unary(UnaryExpr { op, input, ty })
+    }
+
     fn binary_expr(&mut self, scope: Id<Scope>, expr: &ast::BinaryExpr) -> Expr {
         let lhs = self.expr(scope, &expr.lhs);
         let rhs = self.expr(scope, &expr.rhs);
@@ -253,8 +291,8 @@ impl Lowerer<'_> {
             ast::BinOp::Div => BinOp::Div,
             ast::BinOp::Gt => BinOp::Gt,
             ast::BinOp::Lt => BinOp::Lt,
-            ast::BinOp::GtEq => BinOp::GtEq,
-            ast::BinOp::LtEq => BinOp::LtEq,
+            ast::BinOp::GtEq => BinOp::Ge,
+            ast::BinOp::LtEq => BinOp::Le,
             ast::BinOp::Eq => BinOp::Eq,
             ast::BinOp::Ne => BinOp::Ne,
             ast::BinOp::And => BinOp::And,
@@ -423,8 +461,6 @@ impl Lowerer<'_> {
     }
 
     fn match_expr(&mut self, scope: Id<Scope>, expr: &ast::MatchExpr) -> Expr {
-        assert!(!expr.arms.is_empty());
-
         let ty = self.add_inferred_type();
 
         let mut arms = Vec::new();

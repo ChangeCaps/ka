@@ -1,4 +1,0 @@
-import "intrinsic" as intrinsic
-
-is 'a -> nat
-hash x = intrinsic::hash x

@@ -21,11 +21,11 @@ where
     pub fn write(&mut self) -> io::Result<()> {
         for global in self.program.globals.values() {
             write!(self.writer, "global ")?;
-            self.write_pat(&global.pat)?;
+            self.pat(&global.pat)?;
             write!(self.writer, " =")?;
 
-            self.write_line(1)?;
-            self.write_expr(1, &global.expr)?;
+            self.line(1)?;
+            self.expr(1, &global.expr)?;
 
             writeln!(self.writer)?;
             writeln!(self.writer)?;
@@ -34,11 +34,11 @@ where
         Ok(())
     }
 
-    fn write_line(&mut self, indent: usize) -> io::Result<()> {
+    fn line(&mut self, indent: usize) -> io::Result<()> {
         write!(self.writer, "\n{}", " ".repeat(indent * 2))
     }
 
-    fn write_expr(&mut self, indent: usize, expr: &Expr) -> io::Result<()> {
+    fn expr(&mut self, indent: usize, expr: &Expr) -> io::Result<()> {
         match expr {
             Expr::Value(expr) => match expr.value {
                 Value::Num(x) => write!(self.writer, "{x}")?,
@@ -56,59 +56,59 @@ where
 
             Expr::Let(expr) => {
                 write!(self.writer, "let ")?;
-                self.write_pat(&expr.pat)?;
+                self.pat(&expr.pat)?;
                 write!(self.writer, " = ")?;
-                self.write_expr(indent, &expr.input)?;
+                self.expr(indent, &expr.input)?;
                 write!(self.writer, " in")?;
-                self.write_line(indent + 1)?;
-                self.write_expr(indent + 1, &expr.expr)?;
+                self.line(indent + 1)?;
+                self.expr(indent + 1, &expr.expr)?;
             }
 
             Expr::Bind(expr) => {
                 write!(self.writer, "bind ")?;
 
-                self.write_pat(&expr.pat)?;
+                self.pat(&expr.pat)?;
 
                 write!(self.writer, " = ")?;
 
-                self.write_expr(indent, &expr.input)?;
+                self.expr(indent, &expr.input)?;
 
                 write!(self.writer, " in ")?;
 
-                self.write_captures(&self.program.scopes[expr.scope].captures)?;
+                self.captures(&self.program.scopes[expr.scope].captures)?;
 
-                self.write_line(indent + 1)?;
-                self.write_expr(indent + 1, &expr.expr)?;
+                self.line(indent + 1)?;
+                self.expr(indent + 1, &expr.expr)?;
             }
 
             Expr::Pure(expr) => {
                 write!(self.writer, "pure ")?;
-                self.write_expr(indent, &expr.expr)?;
+                self.expr(indent, &expr.expr)?;
             }
 
             Expr::Call(expr) => {
                 write!(self.writer, "(")?;
-                self.write_expr(indent, &expr.lambda)?;
+                self.expr(indent, &expr.lambda)?;
                 write!(self.writer, " ")?;
-                self.write_expr(indent, &expr.input)?;
+                self.expr(indent, &expr.input)?;
                 write!(self.writer, ")")?;
             }
 
             Expr::With(..) => todo!(),
 
             Expr::Field(expr) => {
-                self.write_expr(indent, &expr.input)?;
+                self.expr(indent, &expr.input)?;
                 write!(self.writer, ".{}", expr.name)?;
             }
 
             Expr::Lambda(expr) => {
                 write!(self.writer, "\\")?;
-                self.write_pat(&expr.input)?;
+                self.pat(&expr.input)?;
                 write!(self.writer, ". ")?;
-                self.write_captures(&self.program.scopes[expr.scope].captures)?;
+                self.captures(&self.program.scopes[expr.scope].captures)?;
 
-                self.write_line(indent + 1)?;
-                self.write_expr(indent + 1, &expr.expr)?;
+                self.line(indent + 1)?;
+                self.expr(indent + 1, &expr.expr)?;
             }
 
             Expr::Variant(expr) => {
@@ -116,11 +116,13 @@ where
 
                 if let Some(ref expr) = expr.expr {
                     write!(self.writer, " ")?;
-                    self.write_expr(indent, expr)?;
+                    self.expr(indent, expr)?;
                 }
             }
 
             Expr::Record(..) => todo!(),
+
+            Expr::Unary(..) => todo!(),
 
             Expr::Binary(..) => todo!(),
 
@@ -128,7 +130,7 @@ where
                 write!(self.writer, "(")?;
 
                 for (i, field) in expr.fields.iter().enumerate() {
-                    self.write_expr(indent, field)?;
+                    self.expr(indent, field)?;
 
                     if i < expr.fields.len() - 1 {
                         write!(self.writer, ", ")?;
@@ -140,16 +142,16 @@ where
 
             Expr::Match(expr) => {
                 write!(self.writer, "match ")?;
-                self.write_expr(indent, &expr.expr)?;
+                self.expr(indent, &expr.expr)?;
 
                 for arm in &expr.arms {
-                    self.write_line(indent + 1)?;
-                    self.write_pat(&arm.pat)?;
+                    self.line(indent + 1)?;
+                    self.pat(&arm.pat)?;
 
                     write!(self.writer, " ->")?;
 
-                    self.write_line(indent + 2)?;
-                    self.write_expr(indent + 2, &arm.expr)?;
+                    self.line(indent + 2)?;
+                    self.expr(indent + 2, &arm.expr)?;
                 }
             }
 
@@ -161,7 +163,7 @@ where
         Ok(())
     }
 
-    fn write_captures(&mut self, captures: &[Id<Var>]) -> io::Result<()> {
+    fn captures(&mut self, captures: &[Id<Var>]) -> io::Result<()> {
         write!(self.writer, "[")?;
 
         for (i, var) in captures.iter().copied().enumerate() {
@@ -178,7 +180,7 @@ where
         Ok(())
     }
 
-    fn write_pat(&mut self, pat: &Pat) -> io::Result<()> {
+    fn pat(&mut self, pat: &Pat) -> io::Result<()> {
         match pat {
             Pat::Wild(..) => write!(self.writer, "_")?,
 
@@ -192,13 +194,13 @@ where
 
                 if let Some(ref pat) = pat.payload {
                     write!(self.writer, " ")?;
-                    self.write_pat(pat)?;
+                    self.pat(pat)?;
                 }
             }
 
             Pat::Tuple(pat) => {
                 for (i, field) in pat.fields.iter().enumerate() {
-                    self.write_pat(field)?;
+                    self.pat(field)?;
 
                     if i < pat.fields.len() - 1 {
                         write!(self.writer, ", ")?;

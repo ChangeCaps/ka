@@ -15,6 +15,7 @@ pub enum Expr {
     Lambda(LambdaExpr),
     Variant(VariantExpr),
     Record(RecordExpr),
+    Unary(UnaryExpr),
     Binary(BinaryExpr),
     Tuple(TupleExpr),
     Block(BlockExpr),
@@ -100,6 +101,21 @@ pub struct ExprField {
 pub struct TupleExpr {
     pub fields: Vec<Expr>,
     pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct UnaryExpr {
+    pub op: UnOp,
+    pub input: Box<Expr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum UnOp {
+    Nat,
+    Int,
+    Real,
+    Not,
 }
 
 #[derive(Clone, Debug)]
@@ -228,6 +244,7 @@ impl Expr {
             Self::Lambda(expr) => expr.span,
             Self::Variant(expr) => expr.span,
             Self::Record(expr) => expr.span,
+            Self::Unary(expr) => expr.span,
             Self::Binary(expr) => expr.span,
             Self::Tuple(expr) => expr.span,
             Self::Block(expr) => expr.span,

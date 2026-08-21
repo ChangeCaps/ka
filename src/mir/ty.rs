@@ -6,13 +6,18 @@ pub enum Ty {
     Nat,
     Int,
     Real,
-    Tuple(Rc<[Ty]>),
-    Action(Rc<Ty>),
+    Bool,
+    Tuple(Rc<[Self]>),
+    Record(Rc<[(&'static str, Self)]>),
+    Union(Rc<[(&'static str, Self)]>),
+    Action(Rc<Self>),
+    Lambda(Rc<Self>, Rc<Self>),
+    Boxed(usize),
 }
 
 impl Ty {
     pub fn unit() -> Self {
-        Self::Tuple(Rc::new([]))
+        Self::Record(Rc::new([]))
     }
 
     pub fn action(output: Self) -> Self {
