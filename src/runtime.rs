@@ -435,7 +435,11 @@ impl<'a> Runtime<'a> {
                         Value::Bool(lhs.as_str() == rhs.as_str())
                     }
 
-                    Intrinsic::StrLength => todo!(),
+                    Intrinsic::StrLength => {
+                        let input = inputs.next().unwrap();
+                        let len = input.as_str().chars().count();
+                        Value::Nat(len as u64)
+                    }
 
                     Intrinsic::StrPrepend => {
                         let a = inputs.next().unwrap();
@@ -444,8 +448,39 @@ impl<'a> Runtime<'a> {
                         Value::Str(format!("{}{}", a.as_str(), b.as_str()))
                     }
 
-                    Intrinsic::StrSplitAt => todo!(),
-                    Intrinsic::StrFind => todo!(),
+                    Intrinsic::StrSplitAt => {
+                        let string = inputs.next().unwrap();
+                        let index = inputs.next().unwrap();
+
+                        let string = string.as_str();
+                        let index = index.as_nat();
+
+                        let byte = string
+                            .chars()
+                            .take(index as usize)
+                            .map(char::len_utf8)
+                            .sum::<usize>();
+
+                        let (start, end) = string.split_at(byte);
+
+                        Value::Tuple(Rc::new([Value::Str(start.into()), Value::Str(end.into())]))
+                    }
+
+                    Intrinsic::StrFind => {
+                        let haystack = inputs.next().unwrap();
+                        let needle = inputs.next().unwrap();
+
+                        let haystack = haystack.as_str();
+                        let needle = needle.as_str();
+
+                        haystack
+                            .find(needle)
+                            .and_then(|byte| haystack.char_indices().position(|(i, _)| i == byte))
+                            .map_or_else(
+                                || Value::Variant(0, Rc::new(Value::Tuple(Rc::new([])))),
+                                |index| Value::Variant(1, Rc::new(Value::Nat(index as u64))),
+                            )
+                    }
                 }
             }
         }

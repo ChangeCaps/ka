@@ -1,0 +1,44 @@
+import "std:list" as list
+import "std:option" as option
+
+import "ka:diagnostic/span" as span
+
+type severity =
+  | :error
+  | :warning
+
+type diagnostic = {
+  severity: severity
+  message: str
+  labels: list label
+  note: option str
+}
+
+type label = {
+  message: str
+  span: span
+}
+
+is severity -> str -> diagnostic
+empty severity message =
+  {
+    severity: severity
+    message: message
+    labels: list::empty
+    note: :none
+  }
+
+is str -> diagnostic
+error message = empty (:error) message
+
+is str -> diagnostic
+warning message = empty (:warning) message
+
+is span -> str -> diagnostic -> diagnostic
+label span message diagnostic =
+  let label = { message: message; span: span }
+
+  diagnostic with {
+    labels: diagnostic.labels
+      |> list::push label
+  }

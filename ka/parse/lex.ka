@@ -1,0 +1,137 @@
+import "std:list" as list
+import "std:string" as string
+import "std:option" as option
+
+import "ka:parse/token"           as token
+import "ka:diagnostic/diagnostic" as diagnostic
+import "ka:diagnostic/span"       as span
+
+type lexer = {
+  file: file
+  rem:  str
+  idx:  nat
+
+  tokens:      list (token, span)
+  diagnostics: list diagnostic
+}
+
+is file -> str -> list (token, span), list diagnostic
+lex file input =
+  let lexer = {
+    file: file
+    rem:  input
+    idx:  0
+
+    tokens: list::empty
+    diagnostics: list::empty
+  }
+
+  let lexer = all lexer
+
+  lexer.tokens, lexer.diagnostics
+
+local all lexer =
+  match string::is-empty lexer.rem
+    :true -> lexer
+    :false -> lexer
+      |> token
+      |> all
+
+local token lexer =
+  let start = lexer.idx
+
+  let lexer, token = lexer
+    |> ident
+    |> some-or (invalid lexer)
+
+  let end = lexer.idx
+
+  let span = {
+    file: lexer.file
+    start: start
+    len: end - start
+  }
+
+  with-token token span lexer
+
+local ident lexer =
+  match is-ident-start (next lexer)
+    :false -> :none
+    :true ->
+      let lexer, ident = lexer
+        |> consume-while is-ident-continue
+
+      let token = :ident ident  
+      :some (lexer, token)
+
+local invalid lexer =
+  let c = next lexer
+  let token = :invalid c
+
+  let start = lexer.idx
+  let lexer = consume lexer
+  let end = lexer.idx
+
+  let span = {
+    file: lexer.file
+    start: start
+    len: end - start
+  }
+
+  let message = "unrecognized character `"
+    |> string::append c
+    |> string::append "`"
+
+  let diagnostic = error message
+    |> label span "found here"
+
+  let lexer = lexer
+    |> with-diagnostic diagnostic
+
+  lexer, token
+
+local with-token token span lexer =
+  lexer with {
+    tokens: list::push (token, span) lexer.tokens
+  }
+
+local with-diagnostic diagnostic lexer =
+  lexer with {
+    diagnostics: lexer.diagnostics
+      |> list::push diagnostic
+  }
+
+local next lexer =
+  string::first lexer.rem
+    |> some-or ""
+
+local consume lexer =
+  match string::pop lexer.rem
+    :none -> lexer
+    :some (_, rem) ->
+      lexer with {
+        rem: rem
+        idx: lexer.idx + 1
+      }
+
+local consume-while f lexer =
+  let c = next lexer
+
+  match f c
+    :true ->
+      let lexer, s = lexer
+        |> consume
+        |> consume-while f
+
+      lexer, string::prepend c s
+
+    :false -> lexer, ""
+
+local is-ident-start c = is-alphabetic c
+local is-ident-continue c = is-alphabetic c or is-digit c
+
+local digits = "0123456789"
+local alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+local is-digit c = string::contains c digits
+local is-alphabetic c = string::contains c alphabet

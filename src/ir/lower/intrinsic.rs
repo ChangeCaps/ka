@@ -187,7 +187,7 @@ impl Lowerer<'_> {
             "str-split-at",
             Intrinsic::StrSplitAt,
             [Ty::Str, Ty::NAT],
-            Ty::option(Ty::Tuple(vec![Ty::Str, Ty::Str])),
+            Ty::Tuple(vec![Ty::Str, Ty::Str]),
         );
     }
 

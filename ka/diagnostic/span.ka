@@ -1,0 +1,7 @@
+type file = nat
+
+type span = {
+  file:  file
+  start: nat
+  len:   nat
+}

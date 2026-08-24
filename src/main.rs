@@ -1,4 +1,8 @@
-use std::{ffi, fs, io, path::Path, time::Instant};
+use std::{
+    ffi, fs, io,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use ka::{
     ast,
@@ -9,17 +13,26 @@ use ka::{
     parse::{self, Parser},
 };
 
+#[derive(clap::Parser)]
+struct Args {
+    path: PathBuf,
+}
+
 fn main() -> io::Result<()> {
+    let args = <Args as clap::Parser>::parse();
+
+    let name = args.path.file_stem().unwrap().to_string_lossy();
+
     let mut compiler = Compiler::new();
 
     let t = Instant::now();
 
-    compiler.add_package("test", "test")?;
     compiler.add_package("std", "std")?;
+    compiler.add_package(&name, &args.path)?;
 
     eprintln!("parsing took: {:?}", t.elapsed());
 
-    compiler.run("test");
+    compiler.run(&name);
 
     Ok(())
 }
@@ -79,10 +92,10 @@ impl Compiler {
 
             eprintln!("mir lowering took: {:?}", t.elapsed());
 
-            ka::mir::write(io::stderr(), &entry).unwrap();
+            // ka::mir::write(io::stderr(), &entry).unwrap();
 
-            println!();
-            println!();
+            eprintln!();
+            eprintln!();
 
             let t = Instant::now();
 

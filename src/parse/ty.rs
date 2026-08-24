@@ -27,28 +27,12 @@ pub fn is_ty(token: Token) -> bool {
 pub fn ty(parser: &mut Parser) -> Ty {
     match parser.peek() {
         Token::Newline => block_union(parser),
-        _ => tuple(parser),
+        _ => lambda(parser),
     }
-}
-
-fn tuple(parser: &mut Parser) -> Ty {
-    let first = lambda(parser);
-
-    if !parser.is(Token::Comma) {
-        return first;
-    }
-
-    let mut fields = vec![first];
-
-    while parser.take(Token::Comma) {
-        fields.push(lambda(parser));
-    }
-
-    Ty::Tuple(TupleTy { fields })
 }
 
 fn lambda(parser: &mut Parser) -> Ty {
-    let input = union(parser);
+    let input = tuple(parser);
 
     if !parser.take(Token::RightArrow) {
         return input;
@@ -60,6 +44,22 @@ fn lambda(parser: &mut Parser) -> Ty {
         input: Box::new(input),
         output: Box::new(output),
     })
+}
+
+fn tuple(parser: &mut Parser) -> Ty {
+    let first = union(parser);
+
+    if !parser.is(Token::Comma) {
+        return first;
+    }
+
+    let mut fields = vec![first];
+
+    while parser.take(Token::Comma) {
+        fields.push(union(parser));
+    }
+
+    Ty::Tuple(TupleTy { fields })
 }
 
 fn union(parser: &mut Parser) -> Ty {

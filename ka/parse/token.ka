@@ -1,0 +1,67 @@
+import "std:list" as list
+
+import "ka:diagnostic/span" as span
+
+type tokens = list (token, span)
+
+type token =
+  | :ident str
+  | :string str
+  | :number real
+
+  | :invalid str
+  | :whitespace
+  | :newline
+  | :indent
+  | :dedent
+  | :eof
+
+  | :and'
+  | :as'
+  | :do'
+  | :extern'
+  | :import'
+  | :int'
+  | :is'
+  | :let'
+  | :local'
+  | :match'
+  | :nat'
+  | :real'
+  | :or'
+  | :str'
+  | :type'
+  | :with'
+
+  | :eq
+  | :colon
+  | :semi
+  | :dot
+  | :comma
+  | :plus
+  | :minus
+  | :star
+  | :slash
+  | :gt
+  | :lt
+  | :pipe
+  | :bang
+  | :under
+  | :back
+  | :quote
+
+  | :open-paren
+  | :close-paren
+  | :open-brace
+  | :close-brace
+  | :open-bracket
+  | :close-bracket
+
+  | :colon-colon
+  | :right-arrow
+  | :left-arrow
+  | :pipe-gt
+  | :eq-eq
+  | :bang-eq
+  | :gt-eq
+  | :lt-eq

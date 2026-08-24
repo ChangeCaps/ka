@@ -155,6 +155,8 @@ impl<'a> Lowerer<'a> {
                 }
             }
 
+            (ir::Ty::Union(..), Ty::Bool) => {}
+
             (ir::Ty::Alias(actual), expected) => {
                 let alias = &self.program.aliases[actual.alias];
                 let mut generics = HashMap::new();
@@ -378,6 +380,16 @@ impl ScopedLowerer<'_, '_> {
             }
 
             ir::Expr::Variant(expr) => {
+                let ty = self.ty(&expr.ty);
+
+                if let Ty::Bool = ty {
+                    return match expr.name {
+                        "true" => Expr::Constant(Constant::Bool(true)),
+                        "false" => Expr::Constant(Constant::Bool(false)),
+                        _ => panic!(),
+                    };
+                }
+
                 let payload = match expr.expr {
                     Some(ref payload) => self.expr(payload),
                     None => Expr::unit(),
