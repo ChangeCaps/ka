@@ -102,8 +102,9 @@ local format-dynamic p x =
       |> join ", "
       |> paren p 0
 
-    :variant (name, x) ->
-      name
+    :variant (name, x) -> match x
+      :none -> name |> prepend ":"
+      :some x -> name
         |> prepend ":"
         |> append " "
         |> append (format-dynamic 1 x)

@@ -1,6 +1,7 @@
 use std::{
     ffi, fs, io,
     path::{Path, PathBuf},
+    process,
     time::Instant,
 };
 
@@ -86,22 +87,22 @@ impl Compiler {
         }
 
         if let Some(main) = main {
-            let t = Instant::now();
+            let lua = ka::lua::codegen(&program, main);
 
-            let entry = ka::mir::lower::lower(&program, main);
+            fs::write("out.lua", lua).unwrap();
 
-            eprintln!("mir lowering took: {:?}", t.elapsed());
+            process::Command::new("stylua")
+                .arg("out.lua")
+                .output()
+                .unwrap();
 
-            // ka::mir::write(io::stderr(), &entry).unwrap();
-
-            eprintln!();
-            eprintln!();
-
-            let t = Instant::now();
-
-            ka::runtime::run(&entry);
-
-            eprintln!("running: {:?}", t.elapsed());
+            process::Command::new("lua")
+                .arg("out.lua")
+                .stdin(process::Stdio::inherit())
+                .stdout(process::Stdio::inherit())
+                .stderr(process::Stdio::inherit())
+                .output()
+                .unwrap();
         }
     }
 

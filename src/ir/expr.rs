@@ -40,7 +40,7 @@ pub struct VarExpr {
 pub struct LetExpr {
     pub input: Box<Expr>,
     pub pat: Pat,
-    pub expr: Box<Expr>,
+    pub output: Box<Expr>,
 }
 
 #[derive(Clone, Debug)]
@@ -48,12 +48,12 @@ pub struct BindExpr {
     pub scope: Id<Scope>,
     pub input: Box<Expr>,
     pub pat: Pat,
-    pub expr: Box<Expr>,
+    pub output: Box<Expr>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PureExpr {
-    pub expr: Box<Expr>,
+    pub input: Box<Expr>,
     pub ty: Ty,
 }
 
@@ -82,14 +82,14 @@ pub struct FieldExpr {
 pub struct LambdaExpr {
     pub scope: Id<Scope>,
     pub input: Pat,
-    pub expr: Box<Expr>,
+    pub output: Box<Expr>,
     pub ty: Ty,
 }
 
 #[derive(Clone, Debug)]
 pub struct VariantExpr {
     pub name: &'static str,
-    pub expr: Option<Box<Expr>>,
+    pub payload: Option<Box<Expr>>,
     pub ty: Ty,
 }
 
@@ -152,7 +152,7 @@ pub struct TupleExpr {
 
 #[derive(Clone, Debug)]
 pub struct MatchExpr {
-    pub expr: Box<Expr>,
+    pub input: Box<Expr>,
     pub arms: Vec<Arm>,
     pub ty: Ty,
 }
@@ -203,8 +203,8 @@ impl Expr {
         match self {
             Expr::Value(expr) => expr.ty.clone(),
             Expr::Var(expr) => expr.ty.clone(),
-            Expr::Let(expr) => expr.expr.ty(),
-            Expr::Bind(expr) => expr.expr.ty(),
+            Expr::Let(expr) => expr.output.ty(),
+            Expr::Bind(expr) => expr.output.ty(),
             Expr::Pure(expr) => expr.ty.clone(),
             Expr::Call(expr) => expr.ty.clone(),
             Expr::With(expr) => expr.ty.clone(),

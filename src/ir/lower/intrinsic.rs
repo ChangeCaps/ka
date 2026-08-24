@@ -127,7 +127,7 @@ impl Lowerer<'_> {
                     },
                     Variant {
                         name: "variant",
-                        payload: Some(Ty::Tuple(vec![Ty::Str, ty.clone()])),
+                        payload: Some(Ty::Tuple(vec![Ty::Str, Ty::option(ty.clone())])),
                     },
                 ],
             }),
@@ -257,7 +257,7 @@ impl Lowerer<'_> {
         let expr = Expr::Lambda(LambdaExpr {
             scope: self.add_scope(ScopeKind::Lambda, scope),
             input: input_pat,
-            expr: Box::new(Expr::Intrinsic(IntrinsicExpr {
+            output: Box::new(Expr::Intrinsic(IntrinsicExpr {
                 intrinsic,
                 inputs: exprs,
                 ty: output,

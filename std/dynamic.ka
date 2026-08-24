@@ -1,4 +1,5 @@
 import "std:list"
+import "std:option"
 
 import "intrinsic" as intrinsic
 
@@ -11,7 +12,7 @@ type dynamic =
   | :str' str
   | :tuple list dynamic
   | :record list (str, dynamic)
-  | :variant (str, dynamic)
+  | :variant (str, option dynamic)
 
 is 'a -> dynamic
 dynamic x = intrinsic::dynamic x

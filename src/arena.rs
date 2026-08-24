@@ -120,6 +120,12 @@ pub struct Id<T> {
     marker: PhantomData<T>,
 }
 
+impl<T> Id<T> {
+    pub const fn index(self) -> usize {
+        self.index
+    }
+}
+
 impl<T> Clone for Id<T> {
     fn clone(&self) -> Self {
         *self

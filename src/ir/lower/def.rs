@@ -126,7 +126,7 @@ impl Lowerer<'_> {
             Expr::Lambda(LambdaExpr {
                 scope,
                 input,
-                expr,
+                output: expr,
                 ty,
             })
         })

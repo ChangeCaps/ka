@@ -61,7 +61,7 @@ where
                 self.expr(indent, &expr.input)?;
                 write!(self.writer, " in")?;
                 self.line(indent + 1)?;
-                self.expr(indent + 1, &expr.expr)?;
+                self.expr(indent + 1, &expr.output)?;
             }
 
             Expr::Bind(expr) => {
@@ -78,12 +78,12 @@ where
                 self.captures(&self.program.scopes[expr.scope].captures)?;
 
                 self.line(indent + 1)?;
-                self.expr(indent + 1, &expr.expr)?;
+                self.expr(indent + 1, &expr.output)?;
             }
 
             Expr::Pure(expr) => {
                 write!(self.writer, "pure ")?;
-                self.expr(indent, &expr.expr)?;
+                self.expr(indent, &expr.input)?;
             }
 
             Expr::Call(expr) => {
@@ -108,13 +108,13 @@ where
                 self.captures(&self.program.scopes[expr.scope].captures)?;
 
                 self.line(indent + 1)?;
-                self.expr(indent + 1, &expr.expr)?;
+                self.expr(indent + 1, &expr.output)?;
             }
 
             Expr::Variant(expr) => {
                 write!(self.writer, ":{}", expr.name)?;
 
-                if let Some(ref expr) = expr.expr {
+                if let Some(ref expr) = expr.payload {
                     write!(self.writer, " ")?;
                     self.expr(indent, expr)?;
                 }
@@ -142,7 +142,7 @@ where
 
             Expr::Match(expr) => {
                 write!(self.writer, "match ")?;
-                self.expr(indent, &expr.expr)?;
+                self.expr(indent, &expr.input)?;
 
                 for arm in &expr.arms {
                     self.line(indent + 1)?;

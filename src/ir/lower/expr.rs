@@ -169,7 +169,11 @@ impl Lowerer<'_> {
 
         self.constrain_variant(&ty, name, payload.as_ref(), span);
 
-        Expr::Variant(VariantExpr { name, expr, ty })
+        Expr::Variant(VariantExpr {
+            name,
+            payload: expr,
+            ty,
+        })
     }
 
     fn record_expr(&mut self, scope: Id<Scope>, expr: &ast::RecordExpr) -> Expr {
@@ -337,7 +341,7 @@ impl Lowerer<'_> {
             Expr::Let(LetExpr {
                 pat,
                 input: Box::new(val),
-                expr: Box::new(expr),
+                output: Box::new(expr),
             })
         })
     }
@@ -361,7 +365,7 @@ impl Lowerer<'_> {
 
                 let ty = Ty::monad(expr.ty());
 
-                Expr::Pure(PureExpr { expr, ty })
+                Expr::Pure(PureExpr { input: expr, ty })
             }
         }
     }
@@ -383,7 +387,7 @@ impl Lowerer<'_> {
         let mut exprs = Vec::new();
 
         let mut output = Expr::Pure(PureExpr {
-            expr: Box::new(Expr::unit()),
+            input: Box::new(Expr::unit()),
             ty: Ty::monad(Ty::UNIT),
         });
 
@@ -430,14 +434,14 @@ impl Lowerer<'_> {
             LetOrBind::Let(pat, input) => Expr::Let(LetExpr {
                 pat,
                 input: Box::new(input),
-                expr: Box::new(expr),
+                output: Box::new(expr),
             }),
 
             LetOrBind::Bind(scope, pat, input) => Expr::Bind(BindExpr {
                 scope,
                 pat,
                 input: Box::new(input),
-                expr: Box::new(expr),
+                output: Box::new(expr),
             }),
         })
     }
@@ -549,7 +553,11 @@ impl Lowerer<'_> {
             Box::new(target)
         };
 
-        Expr::Match(MatchExpr { expr, arms, ty })
+        Expr::Match(MatchExpr {
+            input: expr,
+            arms,
+            ty,
+        })
     }
 
     fn error_expr(&mut self, _span: Span) -> Expr {

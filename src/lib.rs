@@ -4,6 +4,5 @@ pub mod diagnostic;
 pub mod intern;
 pub mod ir;
 pub mod lex;
-pub mod mir;
+pub mod lua;
 pub mod parse;
-pub mod runtime;
