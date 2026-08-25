@@ -27,6 +27,16 @@ filter f xs =
         :false -> xs
         :true -> push x xs
 
+is ('a -> option 'b) -> list 'a -> list 'b
+filter-map f xs =
+  match xs
+    :none -> empty
+    :some (x, xs) ->
+      let xs = filter-map f xs
+      match f x
+        :none -> xs
+        :some x -> push x xs
+
 is 'acc -> ('acc -> 'a -> 'acc) -> list 'a -> 'acc
 fold acc f xs =
   match xs

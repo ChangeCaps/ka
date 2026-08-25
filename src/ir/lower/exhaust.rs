@@ -17,8 +17,16 @@ impl Lowerer<'_> {
         match column {
             Column::Wild => {
                 for pat in pats {
-                    self.unify(&ty, &pat.ty(), pat.span())
+                    self.unify(&ty, &pat.ty(), pat.span());
                 }
+            }
+
+            Column::Str => {
+                for pat in pats {
+                    self.unify(&Ty::Str, &pat.ty(), pat.span());
+                }
+
+                return Ty::Str;
             }
 
             Column::Tuple(columns) => {
@@ -164,6 +172,8 @@ impl Matrix {
                     let mut stack = matrix.open_column_recurse(&columns);
 
                     let column = match kind {
+                        ConstructorKind::Str(..) => Column::Str,
+
                         ConstructorKind::Tuple(count) => {
                             let fields = stack.drain(stack.len() - count..).rev();
                             Column::Tuple(fields.collect())
@@ -357,6 +367,7 @@ pub(super) struct Constructor {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum ConstructorKind {
+    Str(&'static str),
     Tuple(usize),
     Variant(&'static str, bool),
 }
@@ -365,6 +376,11 @@ impl Pattern {
     pub(super) fn new(pat: &Pat) -> Self {
         match pat {
             Pat::Wild(..) | Pat::Bind(..) | Pat::Error(..) => Self::Wild,
+
+            Pat::Str(pat) => Self::Cons(Constructor {
+                kind: ConstructorKind::Str(pat.string),
+                fields: Vec::new(),
+            }),
 
             Pat::Variant(pat) => Self::Cons(Constructor {
                 kind: ConstructorKind::Variant(pat.name, pat.payload.is_some()),
@@ -390,6 +406,8 @@ impl Pattern {
         match self {
             Pattern::Wild => String::from("_"),
             Pattern::Cons(cons) => match cons.kind {
+                ConstructorKind::Str(s) => format!("\"{s}\""),
+
                 ConstructorKind::Tuple(_) => {
                     let f = cons
                         .fields
@@ -418,6 +436,7 @@ impl Pattern {
 impl ConstructorKind {
     fn arity(&self) -> usize {
         match self {
+            ConstructorKind::Str(..) => 0,
             ConstructorKind::Tuple(arity) => *arity,
             ConstructorKind::Variant(_, payload) => *payload as usize,
         }
@@ -461,6 +480,8 @@ impl Columns {
                     .extend(iter::repeat_n(Column::Wild, kind.arity()));
             }
 
+            Column::Str => {}
+
             Column::Tuple(fields) => {
                 columns.columns.extend(fields.iter().rev().cloned());
             }
@@ -491,6 +512,7 @@ impl Columns {
 #[derive(Clone, Debug)]
 pub(super) enum Column {
     Wild,
+    Str,
     Tuple(Vec<Column>),
     Union(ColumnUnion),
 }
@@ -517,6 +539,8 @@ impl Column {
 
     fn from_cons(cons: &Constructor) -> Self {
         match cons.kind {
+            ConstructorKind::Str(..) => Self::Str,
+
             ConstructorKind::Tuple(_) => {
                 let fields = cons.fields.iter().map(Self::from_pat).collect();
                 Self::Tuple(fields)
@@ -536,6 +560,8 @@ impl Column {
         match (self, other) {
             (_, Self::Wild) => Ok(self.clone()),
             (Self::Wild, _) => Ok(other.clone()),
+
+            (Self::Str, Self::Str) => Ok(self.clone()),
 
             (Self::Tuple(this), Self::Tuple(other)) => {
                 if this.len() != other.len() {
@@ -587,9 +613,9 @@ impl Column {
 
     fn constructors(&self) -> Option<Vec<ConstructorKind>> {
         match self {
-            Column::Wild | Column::Union(ColumnUnion { is_open: true, .. }) => None,
-            Column::Tuple(fields) => Some(vec![ConstructorKind::Tuple(fields.len())]),
-            Column::Union(union) => {
+            Self::Wild | Self::Union(ColumnUnion { is_open: true, .. }) | Self::Str => None,
+            Self::Tuple(fields) => Some(vec![ConstructorKind::Tuple(fields.len())]),
+            Self::Union(union) => {
                 let constructors = union
                     .variants
                     .iter()

@@ -8,6 +8,7 @@ use crate::{
 pub enum Pat {
     Wild(WildPat),
     Bind(BindPat),
+    Str(StrPat),
     Variant(VariantPat),
     Tuple(TuplePat),
     Error(ErrorPat),
@@ -23,6 +24,12 @@ pub struct WildPat {
 pub struct BindPat {
     pub var: Id<Var>,
     pub ty: Ty,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct StrPat {
+    pub string: &'static str,
     pub span: Span,
 }
 
@@ -54,6 +61,8 @@ impl Pat {
 
     pub fn ty(&self) -> Ty {
         match self {
+            Pat::Str(..) => Ty::Str,
+
             Pat::Wild(pat) => pat.ty.clone(),
             Pat::Bind(pat) => pat.ty.clone(),
             Pat::Variant(pat) => pat.ty.clone(),
@@ -66,6 +75,7 @@ impl Pat {
         match self {
             Pat::Wild(pat) => pat.span,
             Pat::Bind(pat) => pat.span,
+            Pat::Str(pat) => pat.span,
             Pat::Variant(pat) => pat.span,
             Pat::Tuple(pat) => pat.span,
             Pat::Error(pat) => pat.span,
@@ -74,10 +84,12 @@ impl Pat {
 
     pub fn is_refutable(&self) -> bool {
         match self {
-            Pat::Wild(..) | Pat::Bind(..) => false,
+            Pat::Str(..) => true,
+
+            Pat::Wild(..) | Pat::Bind(..) | Pat::Error(..) => false,
+
             Pat::Variant(pat) => pat.payload.as_deref().is_some_and(Pat::is_refutable),
             Pat::Tuple(pat) => pat.fields.iter().any(Pat::is_refutable),
-            Pat::Error(..) => false,
         }
     }
 }

@@ -157,5 +157,15 @@ local function strfind(haystack, needle)
 end
 
 local function eq(a, b)
-  return a == b
+  if type(a) == "table" then
+    for k, v in pairs(a) do
+      if v ~= b[k] then
+        return false
+      end
+    end
+
+    return true
+  else
+    return a == b
+  end
 end

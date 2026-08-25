@@ -41,7 +41,11 @@ local token lexer =
   let start = lexer.idx
 
   let lexer, token = lexer
-    |> ident
+    |> whitespace
+    |> some-else (ident lexer)
+    |> some-else (number lexer)
+    |> some-else (symbol lexer)
+    |> some-else (joint-symbol lexer)
     |> some-or (invalid lexer)
 
   let end = lexer.idx
@@ -54,15 +58,88 @@ local token lexer =
 
   with-token token span lexer
 
+local whitespace lexer =
+  match lexer |> next |> is-whitespace
+    :false -> :none
+    :true ->
+      let lexer, _ = lexer
+        |> consume-all is-whitespace
+
+      :some (lexer, :whitespace)
+
 local ident lexer =
-  match is-ident-start (next lexer)
+  match lexer |> next |> is-ident-start
     :false -> :none
     :true ->
       let lexer, ident = lexer
-        |> consume-while is-ident-continue
+        |> consume-all is-ident-continue
 
-      let token = :ident ident  
+      let token = :ident ident
       :some (lexer, token)
+
+local number lexer =
+  match lexer |> next |> is-digit
+    :false -> :none
+    :true ->
+      let lexer, number = lexer
+        |> consume-all is-digit
+
+      let token = :number 0
+      :some (lexer, token)
+
+is str -> nat
+local parse-number s = s
+  |> string::graphemes
+  |> list::filter-map \s. string::find s digits
+  |> list::fold 0 \acc n. acc
+
+local symbol lexer =
+  let token = match lexer |> next
+    "=" -> :eq
+    ":" -> :colon
+    ";" -> :semi
+    "." -> :dot
+    "," -> :comma
+    "+" -> :plus
+    "-" -> :minus
+    "/" -> :slash
+    ">" -> :gt
+    "<" -> :lt
+    "|" -> :pipe
+    "!" -> :bang
+    "_" -> :under
+    "'" -> :quote
+
+    "\\" -> :back
+
+    "(" -> :open-paren
+    ")" -> :close-paren
+    "{" -> :open-brace
+    "}" -> :close-brace
+    "[" -> :open-bracket
+    "]" -> :close-bracket
+
+    c -> :invalid c
+
+  match token
+    :invalid _ -> :none
+    token -> :some (consume lexer, token)
+
+local joint-symbol lexer =
+  let token = match lexer |> next-two
+    "::" -> :coloncolon
+    "->" -> :rightarrow
+    "<-" -> :leftarrow
+    "|>" -> :pipegt
+    "==" -> :eqeq
+    "!=" -> :bangeq
+    ">=" -> :gteq
+    "<=" -> :lteq
+    c -> :invalid c
+
+  match token
+    :invalid _ -> :none
+    token -> :some (consume (consume lexer), token)
 
 local invalid lexer =
   let c = next lexer
@@ -105,6 +182,10 @@ local next lexer =
   string::first lexer.rem
     |> some-or ""
 
+local next-two lexer =
+  let next, _ = string::split-at 2 lexer.rem
+  next
+
 local consume lexer =
   match string::pop lexer.rem
     :none -> lexer
@@ -114,21 +195,22 @@ local consume lexer =
         idx: lexer.idx + 1
       }
 
-local consume-while f lexer =
+local consume-all f lexer =
   let c = next lexer
 
   match f c
+    :false -> lexer, ""
     :true ->
       let lexer, s = lexer
         |> consume
-        |> consume-while f
+        |> consume-all f
 
       lexer, string::prepend c s
 
-    :false -> lexer, ""
-
 local is-ident-start c = is-alphabetic c
 local is-ident-continue c = is-alphabetic c or is-digit c
+
+local is-whitespace c = c == " "
 
 local digits = "0123456789"
 local alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"

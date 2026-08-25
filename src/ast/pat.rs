@@ -5,6 +5,7 @@ pub enum Pat {
     Paren(ParenPat),
     Wild(WildPat),
     Bind(BindPat),
+    Str(StrPat),
     Tuple(TuplePat),
     Variant(VariantPat),
     Error(Span),
@@ -28,6 +29,12 @@ pub struct BindPat {
 }
 
 #[derive(Clone, Debug)]
+pub struct StrPat {
+    pub string: &'static str,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub struct TuplePat {
     pub fields: Vec<Pat>,
     pub span: Span,
@@ -46,6 +53,7 @@ impl Pat {
             Pat::Paren(pat) => pat.span,
             Pat::Wild(pat) => pat.span,
             Pat::Bind(pat) => pat.span,
+            Pat::Str(pat) => pat.span,
             Pat::Tuple(pat) => pat.span,
             Pat::Variant(pat) => pat.span,
             Pat::Error(span) => *span,

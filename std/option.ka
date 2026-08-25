@@ -18,7 +18,13 @@ is 'a -> option 'a -> 'a
 some-or otherwise x =
   match x
     :some x -> x
-    _ -> otherwise
+    :none -> otherwise
+
+is option 'a -> option 'a -> option 'a
+some-else otherwise x =
+  match x
+    :some x -> :some x
+    :none -> otherwise
 
 is option 'a -> bool
 is-some x =

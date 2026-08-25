@@ -189,6 +189,10 @@ where
                 write!(self.writer, "{}", var.name)?;
             }
 
+            Pat::Str(pat) => {
+                write!(self.writer, "\"{}\"", pat.string)?;
+            }
+
             Pat::Variant(pat) => {
                 write!(self.writer, ":{}", pat.name)?;
 

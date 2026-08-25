@@ -61,8 +61,7 @@ impl<'a> Codegen<'a> {
             Expr::Value(expr) => match expr.value {
                 Value::Num(x) => format!("{x}"),
                 Value::Str(ref s) => {
-                    let s = s.replace("\n", "\\n");
-
+                    let s = Self::escape(s);
                     format!("\"{s}\"")
                 }
             },
@@ -311,7 +310,7 @@ impl<'a> Codegen<'a> {
 
     fn pat(&mut self, pat: &Pat, input: String) {
         match pat {
-            Pat::Wild(..) => {}
+            Pat::Wild(..) | Pat::Str(..) => {}
 
             Pat::Bind(pat) => {
                 self.vars.insert(pat.var, input);
@@ -338,6 +337,11 @@ impl<'a> Codegen<'a> {
     fn check(&mut self, pat: &Pat, input: &str) -> String {
         match pat {
             Pat::Wild(..) | Pat::Bind(..) => String::from("true"),
+
+            Pat::Str(pat) => {
+                let s = Self::escape(pat.string);
+                format!("{} == \"{}\"", input, s)
+            }
 
             Pat::Variant(pat) => {
                 if pat.name == "true" && pat.payload.is_none() {
@@ -369,5 +373,14 @@ impl<'a> Codegen<'a> {
 
             Pat::Error(..) => panic!(),
         }
+    }
+
+    fn escape(s: &str) -> String {
+        s.replace("\n", "\\n")
+            .replace("\t", "\\t")
+            .replace("\r", "\\r")
+            .replace("\0", "\\0")
+            .replace("\"", "\\\"")
+            .replace("\\", "\\\\")
     }
 }

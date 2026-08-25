@@ -7,7 +7,7 @@ type tokens = list (token, span)
 type token =
   | :ident str
   | :string str
-  | :number real
+  | :number nat
 
   | :invalid str
   | :whitespace
@@ -57,11 +57,11 @@ type token =
   | :open-bracket
   | :close-bracket
 
-  | :colon-colon
-  | :right-arrow
-  | :left-arrow
-  | :pipe-gt
-  | :eq-eq
-  | :bang-eq
-  | :gt-eq
-  | :lt-eq
+  | :coloncolon
+  | :rightarrow
+  | :leftarrow
+  | :pipegt
+  | :eqeq
+  | :bangeq
+  | :gteq
+  | :lteq

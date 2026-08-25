@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BindPat, ParenPat, Pat, TuplePat, VariantPat, WildPat},
+    ast::{BindPat, ParenPat, Pat, StrPat, TuplePat, VariantPat, WildPat},
     diagnostic::Span,
     lex::Token,
     parse::Parser,
@@ -47,6 +47,7 @@ fn tuple(parser: &mut Parser) -> Pat {
 fn term(parser: &mut Parser) -> Pat {
     match parser.peek() {
         Token::Ident(name) => bind(parser, name),
+        Token::String(name) => str(parser, name),
         Token::Under => wild(parser),
         Token::Colon => variant(parser),
 
@@ -81,6 +82,12 @@ fn bind(parser: &mut Parser, name: &'static str) -> Pat {
     let span = parser.consume();
 
     Pat::Bind(BindPat { name, span })
+}
+
+fn str(parser: &mut Parser, string: &'static str) -> Pat {
+    let span = parser.consume();
+
+    Pat::Str(StrPat { string, span })
 }
 
 fn variant(parser: &mut Parser) -> Pat {

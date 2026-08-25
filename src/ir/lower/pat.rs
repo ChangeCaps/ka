@@ -3,8 +3,8 @@ use crate::{
     ast,
     diagnostic::{Diagnostic, Span},
     ir::{
-        BindPat, ErrorPat, Pat, Scope, ScopeKind, TuplePat, Ty, UnionTy, Var, VarKind, Variant,
-        VariantPat, Visibility, Visible, WildPat, lower::Lowerer,
+        BindPat, ErrorPat, Pat, Scope, ScopeKind, StrPat, TuplePat, Ty, UnionTy, Var, VarKind,
+        Variant, VariantPat, Visibility, Visible, WildPat, lower::Lowerer,
     },
 };
 
@@ -20,6 +20,7 @@ impl Lowerer<'_> {
             ast::Pat::Paren(pat) => self.paren_pat(scope, vis, kind, pat),
             ast::Pat::Wild(pat) => self.wild_pat(scope, vis, kind, pat),
             ast::Pat::Bind(pat) => self.bind_pat(scope, vis, kind, pat),
+            ast::Pat::Str(pat) => self.str_pat(scope, vis, kind, pat),
             ast::Pat::Tuple(pat) => self.tuple_pat(scope, vis, kind, pat),
             ast::Pat::Variant(pat) => self.variant_pat(scope, vis, kind, pat),
             ast::Pat::Error(span) => self.error_pat(*span),
@@ -73,6 +74,19 @@ impl Lowerer<'_> {
 
         let span = pat.span;
         Pat::Bind(BindPat { var, ty, span })
+    }
+
+    fn str_pat(
+        &mut self,
+        _scope: Id<Scope>,
+        _vis: Visibility,
+        _kind: VarKind,
+        pat: &ast::StrPat,
+    ) -> Pat {
+        Pat::Str(StrPat {
+            string: pat.string,
+            span: pat.span,
+        })
     }
 
     fn tuple_pat(
