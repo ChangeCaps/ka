@@ -66,8 +66,8 @@ type import-def = {
 
 type type-def = {
   is-local: bool
-  name:     option str
-  params:   list (option str)
+  name:     str
+  params:   [str]
   ty:       ty
   span:     span
 }
@@ -76,7 +76,7 @@ type global-def = {
   is-local: bool
   ty:       option ty
   pat:      pat
-  params:   list pat
+  params:   [pat]
   input:    expr
   span:     span
 }
@@ -114,42 +114,42 @@ type action-ty = {
 }
 
 type generic-ty = {
-  name: option str
+  name: str
   span: span
 }
 
 type tuple-ty = {
-  fields: list ty
+  fields: [ty]
   span:   span
 }
 
 type record-ty = {
-  fields: list ty-field
+  fields: [ty-field]
   span:   span
 }
 
 type union-ty = {
-  variants: list ty-variant
+  variants: [ty-variant]
   span:     span
 }
 
 type alias-ty = {
   from: option str
   name: str
-  args: list ty
+  args: [ty]
   span: span
 }
 
 type ty-field = {
-  name: option str
+  name: str
   ty:   ty
   span: span
 }
 
 type ty-variant = {
-  name: option str
-  ty:   option ty
-  span: span
+  name:    str
+  payload: option ty
+  span:    span
 }
 
 type paren-pat = {
@@ -172,12 +172,12 @@ type str-pat = {
 }
 
 type tuple-pat = {
-  fields: list pat
+  fields: [pat]
   span:   span
 }
 
 type variant-pat = {
-  name:    option str
+  name:    str
   payload: option pat
   span:    span
 }
@@ -198,7 +198,6 @@ type str-expr = {
 }
 
 type var-expr = {
-  from: option str
   name: str
   span: span
 }
@@ -211,7 +210,7 @@ type field-expr = {
 
 type with-expr = {
   input:  expr
-  fields: list expr-field
+  fields: [expr-field]
   span:   span
 }
 
@@ -222,24 +221,24 @@ type call-expr = {
 }
 
 type lambda-expr = {
-  params: list pat
+  params: [pat]
   output: expr
   span:   span
 }
 
 type variant-expr = {
-  name:    option str
+  name:    str
   payload: option expr
   span:    span
 }
 
 type record-expr = {
-  fields: list expr-field
+  fields: [expr-field]
   span:   span
 }
 
 type tuple-expr = {
-  fields: list expr
+  fields: [expr]
   span:   span
 }
 
@@ -257,7 +256,7 @@ type binary-expr = {
 }
 
 type block-expr = {
-  stmts:  list block-stmt
+  stmts:  [block-stmt]
   output: expr
   span:   span
 }
@@ -268,13 +267,13 @@ type do-expr = {
 }
 
 type do-block-expr = {
-  stmts: list do-block-stmt
+  stmts: [do-block-stmt]
   span:  span
 }
 
 type match-expr = {
   input: expr
-  arms:  list match-arm
+  arms:  [match-arm]
   span:  span
 }
 
@@ -291,7 +290,7 @@ type do-block-stmt =
 type let' = {
   ty:     option ty
   pat:    pat
-  params: list pat
+  params: [pat]
   input:  expr
   span:   span
 }
@@ -299,13 +298,13 @@ type let' = {
 type bind = {
   ty:     option ty
   pat:    pat
-  params: list pat
+  params: [pat]
   input:  expr
   span:   span
 }
 
 type expr-field = {
-  name: option str
+  name: str
   expr: expr
   span: span
 }

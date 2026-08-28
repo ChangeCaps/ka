@@ -14,6 +14,8 @@ pub enum Expr {
     With(WithExpr),
     Field(FieldExpr),
     Lambda(LambdaExpr),
+    Cons(ConsExpr),
+    Empty(EmptyExpr),
     Variant(VariantExpr),
     Record(RecordExpr),
     Unary(UnaryExpr),
@@ -83,6 +85,18 @@ pub struct LambdaExpr {
     pub scope: Id<Scope>,
     pub input: Pat,
     pub output: Box<Expr>,
+    pub ty: Ty,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConsExpr {
+    pub item: Box<Expr>,
+    pub list: Box<Expr>,
+    pub ty: Ty,
+}
+
+#[derive(Clone, Debug)]
+pub struct EmptyExpr {
     pub ty: Ty,
 }
 
@@ -210,6 +224,8 @@ impl Expr {
             Expr::With(expr) => expr.ty.clone(),
             Expr::Field(expr) => expr.ty.clone(),
             Expr::Lambda(expr) => expr.ty.clone(),
+            Expr::Cons(expr) => expr.ty.clone(),
+            Expr::Empty(expr) => expr.ty.clone(),
             Expr::Variant(expr) => expr.ty.clone(),
             Expr::Record(expr) => expr.ty.clone(),
             Expr::Unary(expr) => expr.ty.clone(),

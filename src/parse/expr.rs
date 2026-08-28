@@ -1,8 +1,8 @@
 use crate::{
     ast::{
-        Arm, BinOp, BinaryExpr, BindStmt, BlockExpr, BlockStmt, CallExpr, DoExpr, DoKind, DoStmt,
-        Expr, ExprField, FieldExpr, LambdaExpr, LetStmt, MatchExpr, NamedExpr, NumExpr, ParenExpr,
-        RecordExpr, StrExpr, TupleExpr, UnOp, UnaryExpr, VariantExpr, WithExpr,
+        Arm, BinOp, BinaryExpr, BindStmt, BlockExpr, BlockStmt, CallExpr, ConsExpr, DoExpr, DoKind,
+        DoStmt, Expr, ExprField, FieldExpr, LambdaExpr, LetStmt, ListExpr, MatchExpr, NamedExpr,
+        NumExpr, ParenExpr, RecordExpr, StrExpr, TupleExpr, UnOp, UnaryExpr, VariantExpr, WithExpr,
     },
     lex::Token,
     parse::{self, Parser},
@@ -23,6 +23,7 @@ pub fn is_expr(token: Token) -> bool {
             | Token::Back
             | Token::OpenParen
             | Token::OpenBrace
+            | Token::OpenBracket
     )
 }
 
@@ -300,18 +301,18 @@ fn or(parser: &mut Parser) -> Expr {
 }
 
 fn and(parser: &mut Parser) -> Expr {
-    binary(parser, &[(Token::And, BinOp::And)], eq_ne)
+    binary(parser, &[(Token::And, BinOp::And)], eq)
 }
 
-fn eq_ne(parser: &mut Parser) -> Expr {
+fn eq(parser: &mut Parser) -> Expr {
     binary(
         parser,
         &[(Token::EqEq, BinOp::Eq), (Token::BangEq, BinOp::Ne)],
-        lt_gt,
+        cmp,
     )
 }
 
-fn lt_gt(parser: &mut Parser) -> Expr {
+fn cmp(parser: &mut Parser) -> Expr {
     binary(
         parser,
         &[
@@ -320,8 +321,24 @@ fn lt_gt(parser: &mut Parser) -> Expr {
             (Token::GtEq, BinOp::GtEq),
             (Token::LtEq, BinOp::LtEq),
         ],
-        add_sub,
+        cons,
     )
+}
+
+fn cons(parser: &mut Parser) -> Expr {
+    let item = add_sub(parser);
+
+    if !parser.take(Token::ColonColon) {
+        return item;
+    }
+
+    let list = cons(parser);
+    let span = item.span().join(list.span());
+
+    let item = Box::new(item);
+    let list = Box::new(list);
+
+    Expr::Cons(ConsExpr { item, list, span })
 }
 
 fn add_sub(parser: &mut Parser) -> Expr {
@@ -459,6 +476,7 @@ fn term(parser: &mut Parser) -> Expr {
 
         Token::OpenParen => paren(parser),
         Token::OpenBrace => record(parser),
+        Token::OpenBracket => list(parser),
 
         _ => {
             let span = parser.expected("expression");
@@ -488,25 +506,52 @@ fn number(parser: &mut Parser, number: f64) -> Expr {
 fn named(parser: &mut Parser, name: &'static str) -> Expr {
     let span = parser.consume();
 
-    if parser.take(Token::ColonColon) {
-        let import = Some(name);
-
-        let span = span.join(parser.span());
-        let Some(name) = parser.expect_ident() else {
-            return Expr::Error(span);
-        };
-
-        return Expr::Named(NamedExpr { import, name, span });
-    }
-
-    let import = None;
-    Expr::Named(NamedExpr { import, name, span })
+    Expr::Named(NamedExpr { name, span })
 }
 
 fn string(parser: &mut Parser, string: &'static str) -> Expr {
     let span = parser.consume();
 
     Expr::Str(StrExpr { string, span })
+}
+
+fn list(parser: &mut Parser) -> Expr {
+    let start = parser.expect(Token::OpenBracket);
+
+    let mut items = Vec::new();
+
+    if parser.is(Token::Newline) {
+        parser.take_all(Token::Newline);
+        parser.expect(Token::Indent);
+        parser.take_all(Token::Newline);
+
+        while !parser.is(Token::Dedent) && !parser.is(Token::Eof) {
+            let item = expr(parser);
+            items.push(item);
+
+            parser.take_all(Token::Newline);
+        }
+
+        parser.expect(Token::Dedent);
+    } else {
+        while !parser.is(Token::CloseBracket)
+            && !parser.is(Token::Newline)
+            && !parser.is(Token::Eof)
+        {
+            let item = expr(parser);
+            items.push(item);
+
+            if !parser.take(Token::Semi) {
+                break;
+            }
+        }
+    }
+
+    let end = parser.expect(Token::CloseBracket);
+
+    let span = start.join(end);
+
+    Expr::List(ListExpr { items, span })
 }
 
 fn lambda(parser: &mut Parser) -> Expr {

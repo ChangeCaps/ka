@@ -7,6 +7,7 @@ pub enum Ty {
     Real,
     Str,
     Paren(ParenTy),
+    List(ListTy),
     Lambda(LambdaTy),
     Generic(GenericTy),
     Record(RecordTy),
@@ -20,6 +21,11 @@ pub enum Ty {
 #[derive(Clone, Debug)]
 pub struct ParenTy {
     pub ty: Box<Ty>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ListTy {
+    pub item: Box<Ty>,
 }
 
 #[derive(Clone, Debug)]

@@ -1,21 +1,77 @@
-import "std:list"   as list
+import "std:map" as map
+import "std:list" as list
 import "std:option" as option
-import "std:string" as string
 
-import "ka:parse/token"           as token
-import "ka:diagnostic/diagnostic" as diagnostic
-import "ka:diagnostic/span"       as span
-import "ka:diagnostic/file"       as file
+import "ka:diagnostic/diagnostic"
+import "ka:diagnostic/span"
+import "ka:diagnostic/file"
+import "ka:parse/token"
 
 type state = {
-  tokens: list (token, span)
-  eof:    span
+  file: file
+  eof:  nat
+
+  tokens: [token, nat]
 }
 
 type parsed 'a = {
   value:       'a
-  diagnostics: list diagnostic
+  diagnostics: [diagnostic]
 }
 
-type parser 'a = state -> option (parsed 'a, state)
+type follows = [token]
 
+type parser 'a = {
+  start: [token]
+  parse: follows, state -> option (parsed 'a, state)
+}
+
+is token -> parser token
+token t = {
+  start: [t]
+  parse: \follows, state.
+    let token, tokens = pop state.tokens
+      |> map-some \(t, _), ts. t, ts
+      |> some-or (:eof, [])
+
+    let parsed = {
+      value:       token
+      diagnostics: []
+    }
+
+    let state = state with {
+      tokens: tokens
+    }
+
+    match t == token
+      :true -> :some (parsed, state)
+      :false -> :none
+}
+
+is parser 'a -> parser ('a, span)
+spanned p = {
+  start: p.start
+  parse: \follows, state.
+    let offset s = first s.tokens
+      |> map-some \_, x. x
+      |> some-or s.eof
+
+    let start = offset state
+
+    p.parse (follows, state)
+      |> map-some \parsed, state.
+        let end = offset state
+
+        let span = {
+          file:  state.file
+          start: start
+          len:   end - start
+        }
+
+        let parsed = {
+          value:       parsed.value, span
+          diagnostics: parsed.diagnostics
+        }
+
+        parsed, state
+}

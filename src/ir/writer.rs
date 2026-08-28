@@ -111,6 +111,9 @@ where
                 self.expr(indent + 1, &expr.output)?;
             }
 
+            Expr::Cons(..) => {}
+            Expr::Empty(..) => {}
+
             Expr::Variant(expr) => {
                 write!(self.writer, ":{}", expr.name)?;
 
@@ -192,6 +195,9 @@ where
             Pat::Str(pat) => {
                 write!(self.writer, "\"{}\"", pat.string)?;
             }
+
+            Pat::Cons(..) => todo!(),
+            Pat::Empty(..) => todo!(),
 
             Pat::Variant(pat) => {
                 write!(self.writer, ":{}", pat.name)?;

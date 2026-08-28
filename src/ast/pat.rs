@@ -6,6 +6,8 @@ pub enum Pat {
     Wild(WildPat),
     Bind(BindPat),
     Str(StrPat),
+    Cons(ConsPat),
+    List(ListPat),
     Tuple(TuplePat),
     Variant(VariantPat),
     Error(Span),
@@ -35,6 +37,18 @@ pub struct StrPat {
 }
 
 #[derive(Clone, Debug)]
+pub struct ConsPat {
+    pub first: Box<Pat>,
+    pub rest: Box<Pat>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ListPat {
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub struct TuplePat {
     pub fields: Vec<Pat>,
     pub span: Span,
@@ -54,6 +68,8 @@ impl Pat {
             Pat::Wild(pat) => pat.span,
             Pat::Bind(pat) => pat.span,
             Pat::Str(pat) => pat.span,
+            Pat::Cons(pat) => pat.span,
+            Pat::List(pat) => pat.span,
             Pat::Tuple(pat) => pat.span,
             Pat::Variant(pat) => pat.span,
             Pat::Error(span) => *span,

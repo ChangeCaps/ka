@@ -254,7 +254,7 @@ impl<'a> Lowerer<'a> {
             for (dependency, tys) in lowerer.dependencies.remove(&global).into_iter().flatten() {
                 recurse(lowerer, dependency, rec, stack, order);
 
-                if let Some(i) = stack.iter().rposition(|x| *x == global) {
+                if let Some(i) = stack.iter().rposition(|x| *x == dependency) {
                     for global in stack[i..].iter().copied() {
                         rec.insert(global);
                     }

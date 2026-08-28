@@ -1,101 +1,92 @@
 import "std:option"
 
-type list 'a = option ('a, list 'a)
+is 'a -> ['a] -> ['a]
+push x xs = x :: xs
 
-is list 'a
-empty = :none
+is ['a] -> option ('a, ['a])
+pop xs = match xs
+  x :: xs -> :some (x, xs)
+  [] -> :none
 
-is 'a -> list 'a -> list 'a
-push x xs = :some (x, xs)
+is ['a] -> option 'a
+first xs = match xs
+  x :: _ -> :some x
+  [] -> :none 
 
-is 'a -> list 'a
-one x = empty |> push x
+is ('a -> 'b) -> ['a] -> ['b]
+map f xs = match xs
+  x :: xs -> f x :: map f xs
+  [] -> []
 
-is ('a -> 'b) -> list 'a -> list 'b
-map f xs =
-  match xs
-    :none -> empty
-    :some (x, xs) ->
-      let x = f x
-      let xs = map f xs
-      push x xs
+is ('a -> bool) -> ['a] -> ['a]
+filter f xs = match xs
+  x :: xs -> match f x
+    :false -> filter f xs
+    :true -> x :: filter f xs
+  [] -> []
 
-is ('a -> bool) -> list 'a -> list 'a
-filter f xs =
-  match xs
-    :none -> empty
-    :some (x, xs) ->
-      let xs = filter f xs
-      match f x
-        :false -> xs
-        :true -> push x xs
+is ('a -> option 'b) -> ['a] -> ['b]
+filter-map f xs = match xs
+  x :: xs -> match f x
+    :some x -> x :: filter-map f xs
+    :none -> filter-map f xs
+  [] -> []
 
-is ('a -> option 'b) -> list 'a -> list 'b
-filter-map f xs =
-  match xs
-    :none -> empty
-    :some (x, xs) ->
-      let xs = filter-map f xs
-      match f x
-        :none -> xs
-        :some x -> push x xs
+is ['a] -> ['a]
+reverse xs = extend-reversed xs []
 
-is list 'a -> list 'a
-reverse xs = extend-reversed xs empty
+is ['a] -> ['a] -> ['a]
+append ys xs = match xs
+  x :: xs -> x :: append ys xs
+  [] -> xs
 
-is list 'a -> list 'a -> list 'a
-append ys xs =
-  match xs
-    :none -> xs
-    :some (x, xs) ->
-      append ys xs
-        |> push x
+is ('a -> bool) -> ['a] -> option 'a
+find f xs = match xs
+  x :: xs -> match f x
+    :true -> :some x
+    :false -> find f xs
+  [] -> :none
 
-is 'acc -> ('acc -> 'a -> 'acc) -> list 'a -> 'acc
-fold acc f xs =
-  match xs
-    :none -> acc
-    :some (x, xs) ->
-      let acc = f acc x
-      fold acc f xs
+is ('a -> bool) -> ['a] -> bool
+any f xs = find f xs |> is-some
 
-is ('a -> !'b) -> list 'a -> !list 'b
-each f xs =
-  match xs
-    :none -> do :none
-    :some (x, xs) -> do
-      let x <- f x
-      let xs <- each f xs
-      do push x xs
+is 'a -> ['a] -> bool
+contains x xs = xs |> any \x'. x' == x
 
-is ('a -> 'a -> 'a) -> list 'a -> option 'a
+is 'acc -> ('acc -> 'a -> 'acc) -> ['a] -> 'acc
+fold acc f xs = match xs
+  x :: xs -> fold (f acc x) f xs
+  [] -> acc
+
+is ('a -> !'b) -> ['a] -> !['b]
+each f xs = match xs
+  x :: xs -> do
+    let x <- f x
+    let xs <- each f xs
+    do x :: xs
+  [] -> do []
+
+is ('a -> 'a -> 'a) -> ['a] -> option 'a
 reduce f xs =
   xs |> fold (:none) \acc x.
     match acc
       :none -> :some x
       :some x' -> :some f x x'
 
-is list 'a -> nat
+is ['a] -> nat
 count xs = xs |> fold 0 \c _. c + 1
 
-is nat -> list 'a -> list 'a
-skip n xs =
-  match xs
-    :none -> :none
-    :some (x, xs') ->
-      match n > 0
-        :false -> xs
-        :true -> skip (n - 1) xs'
+is nat -> ['a] -> ['a]
+skip n xs = match xs
+  x :: xs' -> match n > 0
+    :false -> xs
+    :true -> skip (n - 1) xs'
+  [] -> []
 
-is nat -> list 'a -> option 'a
-nth n xs =
-  match skip n xs
-   :some (x, _) -> :some x
-   :none -> :none
+is nat -> ['a] -> option 'a
+nth n xs = skip n xs |> first
 
-local extend-reversed ys xs =
-  match ys
-    :none -> xs
-    :some (y, ys) ->
-      let xs = push y xs
-      extend-reversed ys xs
+is ['a] -> ['a] -> ['a]
+local extend-reversed ys xs = match ys
+  y :: ys -> y :: extend-reversed ys xs
+  [] -> xs

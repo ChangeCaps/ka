@@ -47,6 +47,12 @@ impl Lowerer<'_> {
 
             ast::Ty::Paren(ty) => self.ty(scope, generics, &ty.ty),
 
+            ast::Ty::List(ty) => {
+                let item = self.ty(scope, generics, &ty.item);
+
+                Ty::list(item)
+            }
+
             ast::Ty::Lambda(ty) => {
                 let input = self.ty(scope, generics, &ty.input);
                 let output = self.ty(scope, generics, &ty.output);
@@ -253,11 +259,20 @@ impl Lowerer<'_> {
                 Ty::Str => String::from("str"),
                 Ty::Error => String::from("_"),
 
-                Ty::Infer(bounds) => {
-                    if let Some(info) = infos.get(bounds) {
-                        format!("'{}", info.name)
+                Ty::Infer(bound) => {
+                    if let Some(info) = infos.get(bound) {
+                        if info.occurences == 1 && !info.recursive {
+                            match lowerer.bounds[*bound] {
+                                Bound::Numeric(bound) => String::from(bound.as_str()),
+                                Bound::Record(ref ty) => recurse_record(lowerer, ty, infos),
+                                Bound::Union(ref ty) => recurse_union(lowerer, ty, infos),
+                                Bound::None => format!("'{}", info.name),
+                            }
+                        } else {
+                            format!("'{}", info.name)
+                        }
                     } else {
-                        let subst = lowerer.subst.get(bounds).unwrap();
+                        let subst = lowerer.subst.get(bound).unwrap();
                         recurse(lowerer, subst, infos, precedence)
                     }
                 }
@@ -266,14 +281,19 @@ impl Lowerer<'_> {
                     format!("'{}", generic.name)
                 }
 
+                Ty::List(item) => {
+                    let item = recurse(lowerer, item, infos, 0);
+                    format!("[{}]", item)
+                }
+
                 Ty::Tuple(fields) => {
                     let f = fields
                         .iter()
-                        .map(|field| recurse(lowerer, field, infos, 1))
+                        .map(|field| recurse(lowerer, field, infos, 2))
                         .collect::<Vec<_>>()
                         .join(", ");
 
-                    if precedence > 0 { format!("({f})") } else { f }
+                    if precedence > 1 { format!("({f})") } else { f }
                 }
 
                 Ty::Record(ty) => recurse_record(lowerer, ty, infos),
@@ -295,12 +315,12 @@ impl Lowerer<'_> {
                 }
 
                 Ty::Lambda(ty) => {
-                    let input = recurse(lowerer, &ty.input, infos, 2);
-                    let output = recurse(lowerer, &ty.output, infos, 1);
+                    let input = recurse(lowerer, &ty.input, infos, 1);
+                    let output = recurse(lowerer, &ty.output, infos, 0);
 
                     let f = format!("{} -> {}", input, output);
 
-                    if precedence > 1 { format!("({f})") } else { f }
+                    if precedence > 0 { format!("({f})") } else { f }
                 }
 
                 Ty::Monad(ty) => {
@@ -317,6 +337,10 @@ impl Lowerer<'_> {
         let bounds = infos
             .iter()
             .filter_map(|(id, info)| {
+                if info.occurences == 1 && !info.recursive {
+                    return None;
+                }
+
                 let bound = if info.recursive
                     && let Some(ty) = self.subst.get(id)
                 {
@@ -418,6 +442,10 @@ impl Lowerer<'_> {
                 Ty::Infer(bounds) => recurse_infer(lowerer, *bounds, seen, infos),
 
                 Ty::Numeric(..) | Ty::Generic(..) | Ty::Str | Ty::Error => {}
+
+                Ty::List(item) => {
+                    recurse(lowerer, item, seen, infos);
+                }
 
                 Ty::Tuple(fields) => {
                     for field in fields {

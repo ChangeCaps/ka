@@ -3,10 +3,10 @@ use crate::{
     ast,
     diagnostic::{Diagnostic, Span},
     ir::{
-        Arm, BinOp, BinaryExpr, BindExpr, CallExpr, Expr, ExprField, FieldExpr, LetExpr, MatchExpr,
-        Numeric, Pat, PureExpr, RecordExpr, RecordTy, Scope, ScopeKind, TupleExpr, Ty, TyField,
-        UnOp, UnaryExpr, Value, ValueExpr, VarExpr, VarKind, VariantExpr, Visibility, WildPat,
-        WithExpr,
+        Arm, BinOp, BinaryExpr, BindExpr, CallExpr, ConsExpr, EmptyExpr, Expr, ExprField,
+        FieldExpr, LetExpr, MatchExpr, Numeric, Pat, PureExpr, RecordExpr, RecordTy, Scope,
+        ScopeKind, TupleExpr, Ty, TyField, UnOp, UnaryExpr, Value, ValueExpr, Var, VarExpr,
+        VarKind, VariantExpr, Visibility, WildPat, WithExpr,
         lower::{Generics, Lowerer, exhaust},
     },
 };
@@ -19,6 +19,8 @@ impl Lowerer<'_> {
             ast::Expr::Str(expr) => self.str_expr(scope, expr),
             ast::Expr::Named(expr) => self.named_expr(scope, expr),
             ast::Expr::Field(expr) => self.field_expr(scope, expr),
+            ast::Expr::Cons(expr) => self.cons_expr(scope, expr),
+            ast::Expr::List(expr) => self.list_expr(scope, expr),
             ast::Expr::With(expr) => self.with_expr(scope, expr),
             ast::Expr::Call(expr) => self.call_expr(scope, expr),
             ast::Expr::Lambda(expr) => self.lambda_expr(scope, expr),
@@ -55,10 +57,14 @@ impl Lowerer<'_> {
     }
 
     fn named_expr(&mut self, scope: Id<Scope>, expr: &ast::NamedExpr) -> Expr {
-        let Some(var) = self.resolve_var(scope, expr.import, expr.name) else {
+        let Some(var) = self.resolve_var(scope, None, expr.name) else {
             return self.variable_undefined(expr.span, expr.name);
         };
 
+        self.variable(scope, var, expr.span)
+    }
+
+    fn variable(&mut self, scope: Id<Scope>, var: Id<Var>, span: Span) -> Expr {
         match self.vars[var].kind {
             VarKind::Global(global) => {
                 let ty = self.add_inferred_type();
@@ -69,7 +75,7 @@ impl Lowerer<'_> {
                     .or_default()
                     .entry(global)
                     .or_default()
-                    .push((ty.clone(), expr.span));
+                    .push((ty.clone(), span));
 
                 Expr::Var(VarExpr { var, ty })
             }
@@ -90,6 +96,13 @@ impl Lowerer<'_> {
     }
 
     fn field_expr(&mut self, scope: Id<Scope>, expr: &ast::FieldExpr) -> Expr {
+        if let ast::Expr::Named(import) = expr.input.as_ref()
+            && let Some(name) = expr.name
+            && let Some(var) = self.resolve_var(scope, Some(import.name), name)
+        {
+            return self.variable(scope, var, expr.span);
+        }
+
         let input = self.expr(scope, &expr.input);
         let input = Box::new(input);
 
@@ -101,6 +114,40 @@ impl Lowerer<'_> {
         self.constrain_field(&input.ty(), name, &ty, expr.span);
 
         Expr::Field(FieldExpr { input, name, ty })
+    }
+
+    fn cons_expr(&mut self, scope: Id<Scope>, expr: &ast::ConsExpr) -> Expr {
+        let item = self.expr(scope, &expr.item);
+        let list = self.expr(scope, &expr.list);
+
+        let item = Box::new(item);
+        let list = Box::new(list);
+        let ty = list.ty();
+
+        self.unify(&Ty::list(item.ty()), &ty, expr.span);
+
+        Expr::Cons(ConsExpr { item, list, ty })
+    }
+
+    fn list_expr(&mut self, scope: Id<Scope>, expr: &ast::ListExpr) -> Expr {
+        let ty = self.add_inferred_type();
+
+        let mut list = Expr::Empty(EmptyExpr {
+            ty: Ty::list(ty.clone()),
+        });
+
+        for item in expr.items.iter().rev() {
+            let expr = self.expr(scope, item);
+            self.unify(&expr.ty(), &ty, item.span());
+
+            list = Expr::Cons(ConsExpr {
+                item: Box::new(expr),
+                list: Box::new(list),
+                ty: Ty::list(ty.clone()),
+            });
+        }
+
+        list
     }
 
     fn with_expr(&mut self, scope: Id<Scope>, expr: &ast::WithExpr) -> Expr {

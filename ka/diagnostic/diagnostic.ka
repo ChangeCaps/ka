@@ -10,7 +10,7 @@ type severity =
 type diagnostic = {
   severity: severity
   message: str
-  labels: list label
+  labels: [label]
   note: option str
 }
 
@@ -24,7 +24,7 @@ diagnostic severity message =
   {
     severity: severity
     message: message
-    labels: list::empty
+    labels: []
     note: :none
   }
 
@@ -39,6 +39,5 @@ label span message diagnostic =
   let label = { message: message; span: span }
 
   diagnostic with {
-    labels: diagnostic.labels
-      |> list::push label
+    labels: label :: diagnostic.labels
   }

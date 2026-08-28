@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        AliasTy, GenericTy, LambdaTy, MonadTy, ParenTy, RecordTy, TupleTy, Ty, TyField, UnionTy,
-        Variant,
+        AliasTy, GenericTy, LambdaTy, ListTy, MonadTy, ParenTy, RecordTy, TupleTy, Ty, TyField,
+        UnionTy, Variant,
     },
     diagnostic::Span,
     lex::Token,
@@ -21,6 +21,7 @@ pub fn is_ty(token: Token) -> bool {
             | Token::Bang
             | Token::OpenParen
             | Token::OpenBrace
+            | Token::OpenBracket
     )
 }
 
@@ -165,7 +166,7 @@ fn name(parser: &mut Parser) -> Option<(Option<&'static str>, &'static str, Span
 
     let span = parser.consume();
 
-    if parser.take(Token::ColonColon) {
+    if parser.take(Token::Dot) {
         let import = Some(name);
         let span = span.join(parser.span());
         let name = parser.expect_ident()?;
@@ -188,6 +189,7 @@ fn term(parser: &mut Parser) -> Ty {
 
         Token::OpenParen => paren(parser),
         Token::OpenBrace => record(parser),
+        Token::OpenBracket => list(parser),
 
         _ => {
             let span = parser.expected("type");
@@ -225,6 +227,17 @@ fn real(parser: &mut Parser) -> Ty {
 fn str(parser: &mut Parser) -> Ty {
     parser.expect(Token::Str);
     Ty::Str
+}
+
+fn list(parser: &mut Parser) -> Ty {
+    parser.expect(Token::OpenBracket);
+
+    let item = ty(parser);
+    let item = Box::new(item);
+
+    parser.expect(Token::CloseBracket);
+
+    Ty::List(ListTy { item })
 }
 
 fn generic(parser: &mut Parser) -> Ty {

@@ -3,8 +3,8 @@ use crate::{
     ast,
     diagnostic::{Diagnostic, Span},
     ir::{
-        BindPat, ErrorPat, Pat, Scope, ScopeKind, StrPat, TuplePat, Ty, UnionTy, Var, VarKind,
-        Variant, VariantPat, Visibility, Visible, WildPat, lower::Lowerer,
+        BindPat, ConsPat, EmptyPat, ErrorPat, Pat, Scope, ScopeKind, StrPat, TuplePat, Ty, UnionTy,
+        Var, VarKind, Variant, VariantPat, Visibility, Visible, WildPat, lower::Lowerer,
     },
 };
 
@@ -21,6 +21,8 @@ impl Lowerer<'_> {
             ast::Pat::Wild(pat) => self.wild_pat(scope, vis, kind, pat),
             ast::Pat::Bind(pat) => self.bind_pat(scope, vis, kind, pat),
             ast::Pat::Str(pat) => self.str_pat(scope, vis, kind, pat),
+            ast::Pat::Cons(pat) => self.cons_pat(scope, vis, kind, pat),
+            ast::Pat::List(pat) => self.list_pat(scope, vis, kind, pat),
             ast::Pat::Tuple(pat) => self.tuple_pat(scope, vis, kind, pat),
             ast::Pat::Variant(pat) => self.variant_pat(scope, vis, kind, pat),
             ast::Pat::Error(span) => self.error_pat(*span),
@@ -87,6 +89,43 @@ impl Lowerer<'_> {
             string: pat.string,
             span: pat.span,
         })
+    }
+
+    fn cons_pat(
+        &mut self,
+        scope: Id<Scope>,
+        vis: Visibility,
+        kind: VarKind,
+        pat: &ast::ConsPat,
+    ) -> Pat {
+        let first = self.pat(scope, vis, kind, &pat.first);
+        let rest = self.pat(scope, vis, kind, &pat.rest);
+
+        let first = Box::new(first);
+        let rest = Box::new(rest);
+
+        let ty = rest.ty();
+        let span = pat.span;
+
+        Pat::Cons(ConsPat {
+            first,
+            rest,
+            ty,
+            span,
+        })
+    }
+
+    fn list_pat(
+        &mut self,
+        _scope: Id<Scope>,
+        _vis: Visibility,
+        _kind: VarKind,
+        pat: &ast::ListPat,
+    ) -> Pat {
+        let ty = self.add_inferred_type();
+        let span = pat.span;
+
+        Pat::Empty(EmptyPat { ty, span })
     }
 
     fn tuple_pat(

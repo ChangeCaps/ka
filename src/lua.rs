@@ -151,6 +151,15 @@ impl<'a> Codegen<'a> {
                 format!("function({input}) {stmts} return {output} end")
             }
 
+            Expr::Cons(expr) => {
+                let item = self.expr(&expr.item);
+                let list = self.expr(&expr.list);
+
+                format!("cons({item}, {list})")
+            }
+
+            Expr::Empty(..) => String::from("nil"),
+
             Expr::Variant(expr) => {
                 if expr.name == "true" && expr.payload.is_none() {
                     return String::from("true");
@@ -161,14 +170,10 @@ impl<'a> Codegen<'a> {
                 match expr.payload {
                     Some(ref payload) => {
                         let payload = self.expr(payload);
-
-                        format!(
-                            "{{ ['variant'] = \"{}\", ['payload'] = {} }}",
-                            expr.name, payload,
-                        )
+                        format!("variant(\"{}\", {})", expr.name, payload)
                     }
 
-                    None => format!("{{ ['variant'] = \"{}\" }}", expr.name),
+                    None => format!("variant(\"{}\")", expr.name),
                 }
             }
 
@@ -325,15 +330,23 @@ impl<'a> Codegen<'a> {
 
     fn pat(&mut self, pat: &Pat, input: String) {
         match pat {
-            Pat::Wild(..) | Pat::Str(..) => {}
+            Pat::Wild(..) | Pat::Str(..) | Pat::Empty(..) => {}
 
             Pat::Bind(pat) => {
                 self.vars.insert(pat.var, input);
             }
 
+            Pat::Cons(pat) => {
+                let first = format!("{input}['$item']");
+                let rest = format!("{input}['$rest']");
+
+                self.pat(&pat.first, first);
+                self.pat(&pat.rest, rest);
+            }
+
             Pat::Variant(pat) => {
                 if let Some(ref payload) = pat.payload {
-                    let input = format!("{input}['payload']");
+                    let input = format!("{input}['$payload']");
                     self.pat(payload, input);
                 }
             }
@@ -353,6 +366,18 @@ impl<'a> Codegen<'a> {
         match pat {
             Pat::Wild(..) | Pat::Bind(..) => String::from("true"),
 
+            Pat::Cons(pat) => {
+                let first = format!("{input}['$item']");
+                let rest = format!("{input}['$rest']");
+
+                let first = self.check(&pat.first, &first);
+                let rest = self.check(&pat.rest, &rest);
+
+                format!("{input} ~= nil and {first} and {rest}")
+            }
+
+            Pat::Empty(..) => format!("{input} == nil"),
+
             Pat::Str(pat) => {
                 let s = Self::escape(pat.string);
                 format!("{} == \"{}\"", input, s)
@@ -367,11 +392,11 @@ impl<'a> Codegen<'a> {
 
                 match pat.payload {
                     Some(ref payload) => {
-                        let payload = self.check(payload, &format!("{input}['payload']"));
-                        format!("{}['variant'] == \"{}\" and {}", input, pat.name, payload)
+                        let payload = self.check(payload, &format!("{input}['$payload']"));
+                        format!("{}['$variant'] == \"{}\" and {}", input, pat.name, payload)
                     }
 
-                    None => format!("{}['variant'] == \"{}\"", input, pat.name),
+                    None => format!("{}['$variant'] == \"{}\"", input, pat.name),
                 }
             }
 

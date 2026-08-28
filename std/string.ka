@@ -5,7 +5,7 @@ import "std:dynamic"
 import "intrinsic" as intrinsic
 
 is str -> nat
-length x = intrinsic::str-length x
+length x = intrinsic.str-length x
 
 is str -> bool
 is-empty x = length x == 0
@@ -14,10 +14,10 @@ is 'a -> str
 format x = format-dynamic 0 (dynamic x)
 
 is str -> str -> str
-prepend a b = intrinsic::str-prepend (a, b)
+prepend a b = intrinsic.str-prepend (a, b)
 
 is nat -> str -> str, str
-split-at n s = intrinsic::str-split-at (s, n)
+split-at n s = intrinsic.str-split-at (s, n)
 
 is str -> option (str, str)
 pop s = match is-empty s
@@ -27,17 +27,16 @@ pop s = match is-empty s
 is str -> option str
 first s = s |> pop |> map-some \x, _. x
 
-is str -> list str
-graphemes s =
-  match pop s
-    :none -> list::empty
-    :some (c, rest) -> list::push c (graphemes rest)
+is str -> [str]
+graphemes s = match pop s
+  :some (c, rest) -> c :: graphemes rest
+  :none -> []
 
 is str -> str -> option nat
-find needle haystack = intrinsic::str-find (haystack, needle)
+find needle haystack = intrinsic.str-find (haystack, needle)
 
 is str -> str -> bool
-contains needle haystack = find needle haystack |> option::is-some
+contains needle haystack = find needle haystack |> option.is-some
 
 is str -> str -> str
 append a b = prepend b a
@@ -65,7 +64,7 @@ trim prefix s =
     :false -> s
     :true -> rest
 
-is str -> str -> list str
+is str -> str -> [str]
 split needle haystack =
   find needle haystack
     |> map-some \n. split-at n haystack
@@ -73,18 +72,15 @@ split needle haystack =
       trim needle rest
         |> split needle
         |> push first
-    |> some-or (empty |> push haystack)
+    |> some-or [haystack]
 
-is str -> list str -> str
-join sep xs =
-  match xs
-    :none -> ""
-    :some (x, xs) ->
-      match xs
-        :none -> x
-        :some _ -> x
-          |> append sep
-          |> append (join sep xs)
+is str -> [str] -> str
+join sep xs = match xs
+  x :: [] -> x
+  x :: xs -> x
+    |> append sep
+    |> append (join sep xs)
+  [] -> ""
 
 local format-dynamic p x =
   let paren p p' s =
@@ -104,28 +100,33 @@ local format-dynamic p x =
         |> prepend "\""
         |> append "\""
 
-    :nat' x -> intrinsic::format-nat x
-    :int' x -> intrinsic::format-int x
-    :real' x -> intrinsic::format-real x
+    :nat' x -> intrinsic.format-nat x
+    :int' x -> intrinsic.format-int x
+    :real' x -> intrinsic.format-real x
 
     :lambda -> "lambda"
     :action -> "action"
 
-    :record xs ->
-      match xs
-        :none -> "{}"
-        :some _ -> xs
-          |> list::map \n, x. n
-            |> append ": "
-            |> append (format-dynamic 0 x)
-          |> join "; "
-          |> prepend "{ "
-          |> append " }"
+    :list xs -> xs
+      |> list.map (format-dynamic 0)
+      |> join "; "
+      |> prepend "["
+      |> append "]"
 
     :tuple xs -> xs
-      |> list::map (format-dynamic 1)
+      |> list.map (format-dynamic 1)
       |> join ", "
       |> paren p 0
+
+    :record xs -> match xs
+      [] -> "{}"
+      _  -> xs
+        |> list.map \n, x. n
+          |> append ": "
+          |> append (format-dynamic 0 x)
+        |> join "; "
+        |> prepend "{ "
+        |> append " }"
 
     :variant (name, x) -> match x
       :none -> name |> prepend ":"

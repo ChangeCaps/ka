@@ -312,6 +312,8 @@ impl Lowerer<'_> {
             (Ty::Numeric(lhs), Ty::Numeric(rhs)) if lhs == rhs => {}
             (Ty::Str, Ty::Str) => {}
 
+            (Ty::List(lhs), Ty::List(rhs)) => self.try_unify(lhs, rhs)?,
+
             (Ty::Lambda(lhs), Ty::Lambda(rhs)) => {
                 self.try_unify(&lhs.input, &rhs.input)?;
                 self.try_unify(&lhs.output, &rhs.output)?;
@@ -531,6 +533,8 @@ impl Lowerer<'_> {
 
             match ty {
                 Ty::Infer(..) | Ty::Generic(..) | Ty::Numeric(..) | Ty::Str | Ty::Error => {}
+
+                Ty::List(item) => recurse(item, f),
 
                 Ty::Tuple(fields) => {
                     for field in fields {

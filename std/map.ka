@@ -22,22 +22,21 @@ get key map = get-hashed (hash key) key map
 is 'k -> map 'k 'v -> map 'k 'v
 remove key map = remove-hashed (hash key) key map
 
-is map 'k 'v -> list ('k, 'v)
-list map = extend-list map (:none)
+is map 'k 'v -> ['k, 'v]
+list map = extend-list map []
 
-is map 'k 'v -> list 'k
-keys map = list map |> list::map \k, _. k
+is map 'k 'v -> ['k]
+keys map = list map |> list.map \k, _. k
 
-is map 'k 'v -> list 'v
-values map = list map |> list::map \_, v. v
+is map 'k 'v -> ['v]
+values map = list map |> list.map \_, v. v
 
-local extend-list map xs =
-  match map
-    :none -> xs
-    :some node -> xs
-      |> push (node.key, node.value)
-      |> extend-list node.rhs
-      |> extend-list node.lhs
+local extend-list map xs = match map
+  :none -> xs
+  :some node -> xs
+    |> push (node.key, node.value)
+    |> extend-list node.rhs
+    |> extend-list node.lhs
 
 local insert-hashed hash key value map =
   match map

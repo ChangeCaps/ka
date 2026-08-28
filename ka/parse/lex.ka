@@ -2,368 +2,54 @@ import "std:list" as list
 import "std:string" as string
 import "std:option" as option
 
-import "ka:parse/token"           as token
-import "ka:parse/parser"          as parser
-import "ka:diagnostic/diagnostic" as diagnostic
-import "ka:diagnostic/span"       as span
-import "ka:diagnostic/file"       as file
+import "ka:diagnostic/diagnostic"
+import "ka:diagnostic/file"
+import "ka:diagnostic/span"
+import "ka:parse/token"
 
-type lexer = {
-  file: file
-  rem:  str
-  idx:  nat
+is file -> str -> [token, nat], [diagnostic]
+lex file input =
+  let state = {
+    file:      file
+    offset:    0
+    remaining: input
+  }
 
-  indent: list str
+  let state, ts, ds = token state [] []
 
-  tokens:      list (token, span)
-  diagnostics: list diagnostic
+  ts, ds
+
+is state -> state, token
+local token state =
+  symbol state
+    |> some-or (invalid state)
+
+local type state = {
+  file:      file
+  offset:    nat
+  remaining: str
 }
 
-is list (token, span) -> !{}
-dump-tokens tokens = do
-  import "std:io"
+local symbol state =
+  symbols
+    |> list.find \s, _. starts-with s state.remaining
+    |> map-some \s, t.
+      let n = length s
+      advance n state, t
 
-  println "tokens:"
+local invalid state =
+  let s, _ = split-at 1 state.remaining
+  advance 1 state, :invalid s
 
-  tokens
-    |> list::each \token, span. match token
-      :whitespace -> do {}
-      token -> do
-        format token
-          |> prepend "  "
-          |> println
+local advance n state =
+  let _, remaining = split-at n state.remaining
 
-  do {}
-
-is file -> str -> state, list diagnostic
-lex file input =
-  let lexer = {
-    file: file
-    rem:  input
-    idx:  0
-
-    indent: list::empty
-
-    tokens: list::empty
-    diagnostics: list::empty
+  state with {
+    offset:    state.offset + n
+    remaining: remaining
   }
 
-  let lexer = lexer
-    |> indent
-    |> tokens
-    |> dedent
-
-  let state = {
-    tokens: reverse lexer.tokens
-    eof: {
-      file:  file
-      start: lexer.idx
-      len:   0
-    }
-  }
-
-  state, lexer.diagnostics
-
-local tokens lexer =
-  match string::is-empty lexer.rem
-    :true -> lexer
-    :false ->
-      let lexer = line lexer
-
-      match string::is-empty lexer.rem
-        :true -> lexer
-        :false -> lexer
-          |> token
-          |> tokens
-
-local token lexer =
-  let lexer, token, span = lexer
-    |> spanned \lexer. lexer
-      |> whitespace
-      |> some-else (ident lexer)
-      |> some-else (string lexer)
-      |> some-else (number lexer)
-      |> some-else (symbol lexer)
-      |> some-else (joint-symbol lexer)
-      |> some-or (invalid lexer)
-
-  with-token token span lexer
-
-local line lexer =
-  match lexer |> next |> is-newline
-    :false -> lexer
-    :true ->
-      let lexer, token, span = lexer
-        |> spanned \lexer. consume lexer, :newline
-
-      lexer
-        |> with-token token span
-        |> indent
-
-local dedent lexer =
-  let span = {
-    file: lexer.file
-    start: lexer.idx
-    len: lexer.idx
-  }
-
-  lexer.indent
-    |> list::fold lexer \lexer _.
-      with-token (:dedent) span lexer
-
-local indent lexer =
-  indent-rec (reverse lexer.indent) lexer
-
-local indent-rec inds lexer = match inds
-  :some (ind, inds') -> match string::starts-with ind lexer.rem
-    :true -> lexer
-      |> consume-n (string::length ind)
-      |> indent-rec inds'
-
-    :false ->
-      let lexer, ws, span = lexer
-        |> spanned (consume-all is-whitespace)
-
-      match string::is-empty ws
-        :false ->
-          let diagnostic = "invalid indentation"
-            |> error
-
-          with-diagnostic diagnostic lexer
-
-        :true ->
-          let lexer = inds
-            |> list::fold lexer \lexer _.
-              lexer |> with-token (:dedent) span
-
-          lexer with {
-            indent: lexer.indent
-              |> skip (count inds)
-          }
-
-  :none ->
-    let lexer, ws, span = lexer
-      |> spanned (consume-all is-whitespace)
-
-    match string::is-empty ws
-      :true -> lexer
-      :false -> lexer
-        |> with-indent ws
-        |> with-token (:indent) span
-
-local whitespace lexer =
-  match lexer |> next |> is-whitespace
-    :false -> :none
-    :true ->
-      let lexer, _ = lexer
-        |> consume-all is-whitespace
-
-      :some (lexer, :whitespace)
-
-local ident lexer =
-  match lexer |> next |> is-ident-start
-    :false -> :none
-    :true ->
-      let lexer, ident = lexer
-        |> consume-all is-ident-continue
-
-      let token = :ident ident
-      :some (lexer, token)
-
-local string lexer =
-  match lexer |> next |> is-string
-    :false -> :none
-    :true ->
-      let lexer, s = lexer
-        |> consume
-        |> consume-string (:false)
-
-      let token = s
-        |> string::replace "\\n" "\n"
-        |> string::replace "\\r" "\r"
-        |> string::replace "\\t" "\t"
-        |> string::replace "\\0" "\0"
-        |> string::replace "\\\\" "\\"
-        |> string::replace "\\\"" "\""
-        |> \s. :string s
-
-      :some (consume lexer, token)
-
-local consume-string is-escaped lexer =
-  match next lexer, is-escaped
-    "\"", :false -> lexer, ""
-    "\0", _      -> lexer, ""
-
-    c, _ ->
-      let is-escaped = c == "\\" and !is-escaped
-
-      let lexer, s = lexer
-        |> consume
-        |> consume-string is-escaped
-
-      lexer, string::prepend c s
-
-local number lexer =
-  match lexer |> next |> is-digit
-    :false -> :none
-    :true ->
-      let lexer, s = lexer
-        |> consume-all is-digit
-
-      let token = :number s
-      :some (lexer, token)
-
-local symbol lexer =
-  let token = match lexer |> next
-    "=" -> :eq
-    ":" -> :colon
-    ";" -> :semi
-    "." -> :dot
-    "," -> :comma
-    "+" -> :plus
-    "-" -> :minus
-    "/" -> :slash
-    ">" -> :gt
-    "<" -> :lt
-    "|" -> :pipe
-    "!" -> :bang
-    "_" -> :under
-    "'" -> :quote
-
-    "\\" -> :back
-
-    "(" -> :open-paren
-    ")" -> :close-paren
-    "{" -> :open-brace
-    "}" -> :close-brace
-    "[" -> :open-bracket
-    "]" -> :close-bracket
-
-    c -> :invalid c
-
-  match token
-    :invalid _ -> :none
-    token -> :some (consume lexer, token)
-
-local joint-symbol lexer =
-  let token = match lexer |> next-two
-    "::" -> :coloncolon
-    "->" -> :rightarrow
-    "<-" -> :leftarrow
-    "|>" -> :pipegt
-    "==" -> :eqeq
-    "!=" -> :bangeq
-    ">=" -> :gteq
-    "<=" -> :lteq
-    c -> :invalid c
-
-  match token
-    :invalid _ -> :none
-    token -> :some (consume (consume lexer), token)
-
-local invalid lexer =
-  let c = next lexer
-  let token = :invalid c
-
-  let start = lexer.idx
-  let lexer = consume lexer
-  let end = lexer.idx
-
-  let span = {
-    file: lexer.file
-    start: start
-    len: end - start
-  }
-
-  let message = "unrecognized character `"
-    |> string::append c
-    |> string::append "`"
-
-  let diagnostic = error message
-    |> label span "found here"
-
-  let lexer = lexer
-    |> with-diagnostic diagnostic
-
-  lexer, token
-
-is (lexer -> lexer, 'a) -> lexer -> lexer, 'a, span
-local spanned f lexer =
-  let start = lexer.idx
-  let lexer, output = f lexer
-  let end = lexer.idx
-
-  let span = {
-    file: lexer.file
-    start: start
-    len: end - start
-  }
-
-  lexer, output, span
-
-is str -> nat
-local parse-nat s = s
-  |> string::graphemes
-  |> list::filter-map \s. string::find s digits
-  |> list::fold 0 \acc n. acc * 10 + n
-
-local with-indent ws lexer =
-  lexer with {
-    indent: lexer.indent
-      |> push ws 
-  }
-
-local with-token token span lexer =
-  lexer with {
-    tokens: lexer.tokens
-      |> push (token, span) 
-  }
-
-local with-diagnostic diagnostic lexer =
-  lexer with {
-    diagnostics: lexer.diagnostics
-      |> push diagnostic
-  }
-
-local next lexer =
-  string::first lexer.rem
-    |> some-or ""
-
-local next-two lexer =
-  let next, _ = string::split-at 2 lexer.rem
-  next
-
-local consume lexer = consume-n 1 lexer
-
-local consume-n n lexer =
-  let _, rem = string::split-at n lexer.rem
-
-  lexer with {
-    rem: rem
-    idx: lexer.idx + n
-  }
-
-local consume-all f lexer =
-  let c = next lexer
-
-  match f c, c == ""
-    :true, :false ->
-      let lexer, s = lexer
-        |> consume
-        |> consume-all f
-
-      lexer, string::prepend c s
-    _ -> lexer, ""
-
-local is-ident-start c = is-alphabetic c
-local is-ident-continue c = is-alphabetic c or is-digit c
-
-local is-newline c = c == "\n"
-local is-whitespace c = c == " "
-local is-string c = c == "\""
-
-local digits = "0123456789"
-local alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-local is-digit c = string::contains c digits
-local is-alphabetic c = string::contains c alphabet
+is [str, token]
+local symbols = [
+  "::", :colon-colon
+]

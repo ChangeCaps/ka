@@ -1,3 +1,17 @@
+local function variant(v, p)
+  return {
+    ['$variant'] = v,
+    ['$payload'] = p,
+  }
+end
+
+local function cons(i, r)
+  return {
+    ['$item'] = i,
+    ['$rest'] = r,
+  }
+end
+
 local extern = {
   ["io::print"] = function(x)
     return function()
@@ -9,26 +23,17 @@ local extern = {
       local file = io.open(x, "r")
 
       if file == nil then
-        return {
-          variant = "err",
-          payload = { variant = "not-found" },
-        }
+        return variant("err", variant("not-found"))
       end
 
       local contents = file:read("*a")
       file:close()
 
       if contents == nil then
-        return {
-          variant = "err",
-          payload = { variant = "not-found" },
-        }
+        return variant("err", variant("not-found"))
       end
 
-      return {
-        variant = "ok",
-        payload = contents,
-      }
+      return variant("ok", contents)
     end
   end,
 }
@@ -44,51 +49,51 @@ local function copy(x)
 end
 
 local function dynamic(x)
-  if type(x) == "table" and x.variant ~= nil then
+  if type(x) == "table" and x['$item'] ~= nil then
+    local function list(y)
+      if y ~= nil then
+        return cons(dynamic(y['$item']), list(y['$rest']))
+      else
+        return nil
+      end
+    end
+
+    return variant("list", list(x))
+  elseif type(x) == "nil" then
+    return variant("list", nil)
+  elseif type(x) == "table" and x['$variant'] ~= nil then
     local payload
 
     if x.payload ~= nil then
-      payload = {
-        variant = "some",
-        payload = dynamic(x.payload)
-      }
+      payload = variant("some", dynamic(x.payload))
     else
-      payload = { variant = "none" }
+      payload = variant("none")
     end
 
-    return {
-      variant = "variant",
-      payload = { x.variant, payload }
-    }
+    return variant("variant", payload)
   elseif type(x) == "table" and x[1] ~= nil then
-    local fields = { variant = "none" }
+    local fields = nil
 
     for i = #x, 1, -1 do
-      fields = {
-        variant = "some",
-        payload = { dynamic(x[i]), fields },
-      }
+      fields = cons(dynamic(x[i]), fields)
     end
 
-    return { variant = "tuple", payload = fields }
+    return variant("tuple", fields)
   elseif type(x) == "table" then
-    local fields = { variant = "none" }
+    local fields = nil
 
     for k, v in pairs(x) do
-      fields = {
-        variant = "some",
-        payload = { { k, dynamic(v) }, fields },
-      }
+      fields = cons({ k, dynamic(v) }, fields)
     end
 
-    return { variant = "record", payload = fields }
+    return variant("record", fields)
   elseif type(x) == "boolean" then
   elseif type(x) == "number" then
-    return { variant = "real'", payload = x }
+    return variant("real'", x)
   elseif type(x) == "string" then
-    return { variant = "str'", payload = x }
+    return variant("str'", x)
   elseif type(x) == "function" then
-    return { variant = "action" }
+    return variant("action")
   end
 end
 
@@ -177,13 +182,10 @@ local function strfind(haystack, needle)
   local b = string.find(haystack, needle)
 
   if b == nil then
-    return { variant = "none" }
+    return variant("none")
   end
 
-  return {
-    variant = "some",
-    payload = byte_to_utf8(haystack, b) - 1,
-  }
+  return variant("some", byte_to_utf8(haystack, b) - 1)
 end
 
 local function eq(a, b)

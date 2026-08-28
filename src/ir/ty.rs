@@ -5,6 +5,7 @@ pub enum Ty {
     Str,
     Error,
     Numeric(Numeric),
+    List(Box<Ty>),
     Tuple(Vec<Ty>),
     Record(RecordTy),
     Lambda(LambdaTy),
@@ -52,6 +53,10 @@ impl Ty {
                 },
             ],
         })
+    }
+
+    pub fn list(item: Self) -> Self {
+        Self::List(Box::new(item))
     }
 
     pub fn lambda(input: Self, output: Self) -> Self {

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BindPat, ParenPat, Pat, StrPat, TuplePat, VariantPat, WildPat},
+    ast::{BindPat, ConsPat, ListPat, ParenPat, Pat, StrPat, TuplePat, VariantPat, WildPat},
     diagnostic::Span,
     lex::Token,
     parse::Parser,
@@ -27,7 +27,7 @@ pub fn pat(parser: &mut Parser) -> Pat {
 }
 
 fn tuple(parser: &mut Parser) -> Pat {
-    let first = term(parser);
+    let first = cons(parser);
 
     if !parser.is(Token::Comma) {
         return first;
@@ -36,12 +36,28 @@ fn tuple(parser: &mut Parser) -> Pat {
     let mut fields = vec![first];
 
     while parser.take(Token::Comma) {
-        fields.push(term(parser));
+        fields.push(cons(parser));
     }
 
     let span = fields.iter().map(Pat::span).reduce(Span::join).unwrap();
 
     Pat::Tuple(TuplePat { fields, span })
+}
+
+fn cons(parser: &mut Parser) -> Pat {
+    let first = term(parser);
+
+    if !parser.take(Token::ColonColon) {
+        return first;
+    }
+
+    let rest = cons(parser);
+
+    let first = Box::new(first);
+    let rest = Box::new(rest);
+    let span = first.span().join(rest.span());
+
+    Pat::Cons(ConsPat { first, rest, span })
 }
 
 fn term(parser: &mut Parser) -> Pat {
@@ -52,6 +68,7 @@ fn term(parser: &mut Parser) -> Pat {
         Token::Colon => variant(parser),
 
         Token::OpenParen => paren(parser),
+        Token::OpenBracket => list(parser),
 
         _ => {
             let span = parser.expected("pattern");
@@ -88,6 +105,15 @@ fn str(parser: &mut Parser, string: &'static str) -> Pat {
     let span = parser.consume();
 
     Pat::Str(StrPat { string, span })
+}
+
+fn list(parser: &mut Parser) -> Pat {
+    let start = parser.expect(Token::OpenBracket);
+    let end = parser.expect(Token::CloseBracket);
+
+    let span = start.join(end);
+
+    Pat::List(ListPat { span })
 }
 
 fn variant(parser: &mut Parser) -> Pat {

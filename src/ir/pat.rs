@@ -9,6 +9,8 @@ pub enum Pat {
     Wild(WildPat),
     Bind(BindPat),
     Str(StrPat),
+    Cons(ConsPat),
+    Empty(EmptyPat),
     Variant(VariantPat),
     Tuple(TuplePat),
     Error(ErrorPat),
@@ -30,6 +32,20 @@ pub struct BindPat {
 #[derive(Clone, Debug)]
 pub struct StrPat {
     pub string: &'static str,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConsPat {
+    pub first: Box<Pat>,
+    pub rest: Box<Pat>,
+    pub ty: Ty,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct EmptyPat {
+    pub ty: Ty,
     pub span: Span,
 }
 
@@ -65,6 +81,8 @@ impl Pat {
 
             Pat::Wild(pat) => pat.ty.clone(),
             Pat::Bind(pat) => pat.ty.clone(),
+            Pat::Cons(pat) => pat.ty.clone(),
+            Pat::Empty(pat) => pat.ty.clone(),
             Pat::Variant(pat) => pat.ty.clone(),
             Pat::Tuple(pat) => pat.ty.clone(),
             Pat::Error(pat) => pat.ty.clone(),
@@ -76,6 +94,8 @@ impl Pat {
             Pat::Wild(pat) => pat.span,
             Pat::Bind(pat) => pat.span,
             Pat::Str(pat) => pat.span,
+            Pat::Cons(pat) => pat.span,
+            Pat::Empty(pat) => pat.span,
             Pat::Variant(pat) => pat.span,
             Pat::Tuple(pat) => pat.span,
             Pat::Error(pat) => pat.span,
@@ -84,9 +104,11 @@ impl Pat {
 
     pub fn is_refutable(&self) -> bool {
         match self {
-            Pat::Str(..) => true,
+            Pat::Str(..) | Pat::Empty(..) => true,
 
             Pat::Wild(..) | Pat::Bind(..) | Pat::Error(..) => false,
+
+            Pat::Cons(pat) => pat.first.is_refutable() || pat.rest.is_refutable(),
 
             Pat::Variant(pat) => pat.payload.as_deref().is_some_and(Pat::is_refutable),
             Pat::Tuple(pat) => pat.fields.iter().any(Pat::is_refutable),

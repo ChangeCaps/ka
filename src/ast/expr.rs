@@ -10,6 +10,8 @@ pub enum Expr {
     Str(StrExpr),
     Named(NamedExpr),
     Field(FieldExpr),
+    Cons(ConsExpr),
+    List(ListExpr),
     With(WithExpr),
     Call(CallExpr),
     Lambda(LambdaExpr),
@@ -44,8 +46,20 @@ pub struct StrExpr {
 
 #[derive(Clone, Debug)]
 pub struct NamedExpr {
-    pub import: Option<&'static str>,
     pub name: &'static str,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConsExpr {
+    pub item: Box<Expr>,
+    pub list: Box<Expr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ListExpr {
+    pub items: Vec<Expr>,
     pub span: Span,
 }
 
@@ -239,6 +253,8 @@ impl Expr {
             Self::Str(expr) => expr.span,
             Self::Named(expr) => expr.span,
             Self::Field(expr) => expr.span,
+            Self::Cons(expr) => expr.span,
+            Self::List(expr) => expr.span,
             Self::With(expr) => expr.span,
             Self::Call(expr) => expr.span,
             Self::Lambda(expr) => expr.span,

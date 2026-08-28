@@ -67,45 +67,6 @@ impl Lowerer<'_> {
         });
 
         let ty = self.add_inferred_type();
-        let tuple = self.add_inferred_type();
-        let record = self.add_inferred_type();
-
-        self.unify(
-            &record,
-            &Ty::Union(UnionTy {
-                variants: vec![
-                    Variant {
-                        name: "none",
-                        payload: None,
-                    },
-                    Variant {
-                        name: "some",
-                        payload: Some(Ty::Tuple(vec![
-                            Ty::Tuple(vec![Ty::Str, ty.clone()]),
-                            record.clone(),
-                        ])),
-                    },
-                ],
-            }),
-            Span::DUMMY,
-        );
-
-        self.unify(
-            &tuple,
-            &Ty::Union(UnionTy {
-                variants: vec![
-                    Variant {
-                        name: "none",
-                        payload: None,
-                    },
-                    Variant {
-                        name: "some",
-                        payload: Some(Ty::Tuple(vec![ty.clone(), tuple.clone()])),
-                    },
-                ],
-            }),
-            Span::DUMMY,
-        );
 
         self.unify(
             &ty,
@@ -118,12 +79,16 @@ impl Lowerer<'_> {
                     LAMBDA_VARIANT,
                     ACTION_VARIANT,
                     Variant {
-                        name: "record",
-                        payload: Some(record),
+                        name: "list",
+                        payload: Some(Ty::list(ty.clone())),
                     },
                     Variant {
                         name: "tuple",
-                        payload: Some(tuple),
+                        payload: Some(Ty::list(ty.clone())),
+                    },
+                    Variant {
+                        name: "record",
+                        payload: Some(Ty::list(Ty::Tuple(vec![Ty::Str, ty.clone()]))),
                     },
                     Variant {
                         name: "variant",

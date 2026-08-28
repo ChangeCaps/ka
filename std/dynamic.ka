@@ -10,9 +10,10 @@ type dynamic =
   | :int' int
   | :real' real
   | :str' str
-  | :tuple list dynamic
-  | :record list (str, dynamic)
+  | :list [dynamic]
+  | :tuple [dynamic]
+  | :record [str, dynamic]
   | :variant (str, option dynamic)
 
 is 'a -> dynamic
-dynamic x = intrinsic::dynamic x
+dynamic x = intrinsic.dynamic x

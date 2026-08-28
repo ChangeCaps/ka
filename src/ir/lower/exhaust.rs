@@ -29,6 +29,26 @@ impl Lowerer<'_> {
                 return Ty::Str;
             }
 
+            Column::List(item, list) => {
+                let mut items = Vec::new();
+                let mut lists = Vec::new();
+
+                for mut pat in pats {
+                    while let Pat::Cons(cons) = pat {
+                        items.push(cons.first.as_ref());
+                        pat = &cons.rest;
+                    }
+
+                    lists.push(pat);
+                }
+
+                let item = self.match_input_type(item, items.into_iter(), span);
+                self.unify(&ty, &Ty::list(item), span);
+
+                let list = self.match_input_type(list, lists.into_iter(), span);
+                self.unify(&ty, &list, span);
+            }
+
             Column::Tuple(columns) => {
                 let mut fields = vec![Vec::new(); columns.len()];
 
@@ -174,6 +194,17 @@ impl Matrix {
                     let column = match kind {
                         ConstructorKind::Str(..) => Column::Str,
 
+                        ConstructorKind::Cons => {
+                            let item = stack.pop().unwrap();
+                            let list = stack.pop().unwrap();
+
+                            Column::List(Box::new(item), Box::new(list))
+                        }
+
+                        ConstructorKind::Empty => {
+                            Column::List(Box::new(Column::Wild), Box::new(Column::Wild))
+                        }
+
                         ConstructorKind::Tuple(count) => {
                             let fields = stack.drain(stack.len() - count..).rev();
                             Column::Tuple(fields.collect())
@@ -192,10 +223,10 @@ impl Matrix {
                     stack.push(column);
                     stack
                 })
-                .reduce(|columns_a, columns_b| {
-                    columns_a
+                .reduce(|stack_a, stack_b| {
+                    stack_a
                         .into_iter()
-                        .zip(columns_b)
+                        .zip(stack_b)
                         .map(|(a, b)| a.merge(&b).unwrap())
                         .collect()
                 })
@@ -223,7 +254,7 @@ impl Matrix {
         };
 
         match pat {
-            Pattern::Cons(cons) => {
+            Pattern::Constructor(cons) => {
                 let matrix = self.specialize(cons.kind);
                 let row = row.specialize(cons.kind).unwrap();
                 let columns = columns.specialize(cons.kind);
@@ -299,7 +330,7 @@ impl Matrix {
                         .into_iter()
                         .map(move |mut stack| {
                             let fields = stack.drain(stack.len() - kind.arity()..).rev().collect();
-                            stack.push(Pattern::Cons(Constructor { kind, fields }));
+                            stack.push(Pattern::Constructor(Constructor { kind, fields }));
                             stack
                         })
                 })
@@ -341,12 +372,12 @@ impl Row {
                     .extend(iter::repeat_n(Pattern::Wild, kind.arity()));
             }
 
-            Pattern::Cons(cons) if cons.kind == kind => {
+            Pattern::Constructor(cons) if cons.kind == kind => {
                 row.patterns.pop();
                 row.patterns.extend(cons.fields.iter().rev().cloned());
             }
 
-            Pattern::Cons(..) => return None,
+            Pattern::Constructor(..) => return None,
         }
 
         Some(row)
@@ -356,7 +387,7 @@ impl Row {
 #[derive(Clone, Debug)]
 pub(super) enum Pattern {
     Wild,
-    Cons(Constructor),
+    Constructor(Constructor),
 }
 
 #[derive(Clone, Debug)]
@@ -367,6 +398,8 @@ pub(super) struct Constructor {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum ConstructorKind {
+    Cons,
+    Empty,
     Str(&'static str),
     Tuple(usize),
     Variant(&'static str, bool),
@@ -377,17 +410,27 @@ impl Pattern {
         match pat {
             Pat::Wild(..) | Pat::Bind(..) | Pat::Error(..) => Self::Wild,
 
-            Pat::Str(pat) => Self::Cons(Constructor {
+            Pat::Str(pat) => Self::Constructor(Constructor {
                 kind: ConstructorKind::Str(pat.string),
                 fields: Vec::new(),
             }),
 
-            Pat::Variant(pat) => Self::Cons(Constructor {
+            Pat::Cons(pat) => Self::Constructor(Constructor {
+                kind: ConstructorKind::Cons,
+                fields: vec![Self::new(&pat.first), Self::new(&pat.rest)],
+            }),
+
+            Pat::Empty(..) => Self::Constructor(Constructor {
+                kind: ConstructorKind::Empty,
+                fields: vec![],
+            }),
+
+            Pat::Variant(pat) => Self::Constructor(Constructor {
                 kind: ConstructorKind::Variant(pat.name, pat.payload.is_some()),
                 fields: pat.payload.as_deref().map(Self::new).into_iter().collect(),
             }),
 
-            Pat::Tuple(pat) => Self::Cons(Constructor {
+            Pat::Tuple(pat) => Self::Constructor(Constructor {
                 kind: ConstructorKind::Tuple(pat.fields.len()),
                 fields: pat.fields.iter().map(Self::new).collect(),
             }),
@@ -405,8 +448,17 @@ impl Pattern {
     fn format_recurse(&self, precedence: u8) -> String {
         match self {
             Pattern::Wild => String::from("_"),
-            Pattern::Cons(cons) => match cons.kind {
+            Pattern::Constructor(cons) => match cons.kind {
                 ConstructorKind::Str(s) => format!("\"{s}\""),
+
+                ConstructorKind::Cons => {
+                    let first = cons.fields[0].format_recurse(1);
+                    let rest = cons.fields[1].format_recurse(1);
+
+                    format!("{first} :: {rest}")
+                }
+
+                ConstructorKind::Empty => String::from("[]"),
 
                 ConstructorKind::Tuple(_) => {
                     let f = cons
@@ -436,6 +488,8 @@ impl Pattern {
 impl ConstructorKind {
     fn arity(&self) -> usize {
         match self {
+            ConstructorKind::Cons => 2,
+            ConstructorKind::Empty => 0,
             ConstructorKind::Str(..) => 0,
             ConstructorKind::Tuple(arity) => *arity,
             ConstructorKind::Variant(_, payload) => *payload as usize,
@@ -482,6 +536,17 @@ impl Columns {
 
             Column::Str => {}
 
+            Column::List(item, list) => match kind {
+                ConstructorKind::Cons => {
+                    columns.columns.push(list.as_ref().clone());
+                    columns.columns.push(item.as_ref().clone());
+                }
+
+                ConstructorKind::Empty => {}
+
+                _ => unreachable!(),
+            },
+
             Column::Tuple(fields) => {
                 columns.columns.extend(fields.iter().rev().cloned());
             }
@@ -513,6 +578,7 @@ impl Columns {
 pub(super) enum Column {
     Wild,
     Str,
+    List(Box<Column>, Box<Column>),
     Tuple(Vec<Column>),
     Union(ColumnUnion),
 }
@@ -533,12 +599,23 @@ impl Column {
     pub(super) fn from_pat(pat: &Pattern) -> Self {
         match pat {
             Pattern::Wild => Self::Wild,
-            Pattern::Cons(cons) => Self::from_cons(cons),
+            Pattern::Constructor(cons) => Self::from_cons(cons),
         }
     }
 
     fn from_cons(cons: &Constructor) -> Self {
         match cons.kind {
+            ConstructorKind::Cons => {
+                let first = Self::from_pat(&cons.fields[0]);
+                let rest = Self::from_pat(&cons.fields[1]);
+
+                Self::List(Box::new(first), Box::new(Self::Wild))
+                    .merge(&rest)
+                    .unwrap()
+            }
+
+            ConstructorKind::Empty => Self::List(Box::new(Self::Wild), Box::new(Self::Wild)),
+
             ConstructorKind::Str(..) => Self::Str,
 
             ConstructorKind::Tuple(_) => {
@@ -562,6 +639,13 @@ impl Column {
             (Self::Wild, _) => Ok(other.clone()),
 
             (Self::Str, Self::Str) => Ok(self.clone()),
+
+            (Self::List(this_item, this_list), Self::List(other_item, other_list)) => {
+                let item = this_item.merge(other_item)?;
+                let list = this_list.merge(other_list)?;
+
+                Ok(Self::List(Box::new(item), Box::new(list)))
+            }
 
             (Self::Tuple(this), Self::Tuple(other)) => {
                 if this.len() != other.len() {
@@ -614,6 +698,7 @@ impl Column {
     fn constructors(&self) -> Option<Vec<ConstructorKind>> {
         match self {
             Self::Wild | Self::Union(ColumnUnion { is_open: true, .. }) | Self::Str => None,
+            Self::List(..) => Some(vec![ConstructorKind::Cons, ConstructorKind::Empty]),
             Self::Tuple(fields) => Some(vec![ConstructorKind::Tuple(fields.len())]),
             Self::Union(union) => {
                 let constructors = union

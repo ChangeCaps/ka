@@ -5,9 +5,9 @@ import "ka:diagnostic/diagnostic" as diagnostic
 import "ka:diagnostic/file"       as file
 import "ka:diagnostic/span"       as span
 
-is list diagnostic -> !str
+is [diagnostic] -> !str
 format-all diagnostics =
   do diagnostics
-    |> list::map string::format
-    |> string::join "\n"
+    |> list.map string.format
+    |> string.join "\n"
 
