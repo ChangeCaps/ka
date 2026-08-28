@@ -1,9 +1,1 @@
-import "std:io"
-import "std:map" as map
-
-main = do
-  map::empty
-    |> map::insert "hello" 0
-    |> debug
-
-  do {}
+let x = 0

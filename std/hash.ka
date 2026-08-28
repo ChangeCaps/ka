@@ -7,8 +7,10 @@ is nat -> nat -> nat
 xor x y = intrinsic::nat-xor (x, y)
 
 is 'a -> nat
-hash x =
-  match dynamic x
+hash x = hash-dynamic (dynamic x)
+
+local hash-dynamic x =
+  match x
     :lambda -> hash 0
     :action -> hash 1
 
@@ -18,11 +20,13 @@ hash x =
     :real' x -> intrinsic::hash-real x
 
     :tuple xs -> xs
-      |> map hash
+      |> map hash-dynamic
       |> fold 0 xor
 
     :record xs -> xs
-      |> map \_, x. hash x
+      |> map \_, x. hash-dynamic x
       |> fold 0 xor
 
-    :variant (n, x) -> xor (hash n) (hash x)
+    :variant (n, x) -> match x
+      :none -> hash n
+      :some x -> xor (hash n) (hash-dynamic x)

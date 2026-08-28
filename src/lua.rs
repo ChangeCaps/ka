@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     arena::Id,
-    ir::{BinOp, Expr, Intrinsic, Pat, Program, Value, Var, VarKind},
+    ir::{BinOp, Expr, Intrinsic, Pat, Program, UnOp, Value, Var, VarKind},
 };
 
 pub fn codegen(program: &Program, main: Id<Var>) -> String {
@@ -10,14 +10,22 @@ pub fn codegen(program: &Program, main: Id<Var>) -> String {
     let mut output = String::from(include_str!("prelude.lua"));
 
     for (id, global) in program.globals.iter() {
-        let var = format!("global[{}]", id.index());
+        let var = format!("GLOBAL{}", id.index());
         codegen.pat(&global.pat, var);
     }
 
-    for (id, global) in program.globals.iter() {
+    for id in program.order.iter().copied() {
+        let global = &program.globals[id];
+        let len = codegen.push_scope();
         let expr = codegen.expr(&global.expr);
-        output += &format!("global[{}] = {}", id.index(), expr);
-        output += " ";
+
+        if let Pat::Bind(ref pat) = global.pat {
+            output += &format!("-- {}\n", program.vars[pat.var].name);
+        }
+
+        output += &codegen.pop_scope(len);
+        output += &format!("GLOBAL{} = {}", id.index(), expr);
+        output += "\n\n";
     }
 
     output += &format!("{}()", codegen.vars[&main]);
@@ -91,14 +99,14 @@ impl<'a> Codegen<'a> {
                 let len = self.push_scope();
 
                 let local = self.add_local();
-                self.stmts.push(format!("local {local} = {input}"));
+                self.stmts.push(format!("local {local} = {input}()"));
                 self.pat(&expr.pat, local);
 
                 let output = self.expr(&expr.output);
 
                 let stmts = self.pop_scope(len);
 
-                format!("function() {stmts} return {output} end")
+                format!("function() {stmts} return ({output})() end")
             }
 
             Expr::Pure(expr) => {
@@ -178,7 +186,14 @@ impl<'a> Codegen<'a> {
                 format!("{{ {fields} }}")
             }
 
-            Expr::Unary(expr) => todo!(),
+            Expr::Unary(expr) => {
+                let input = self.expr(&expr.input);
+
+                match expr.op {
+                    UnOp::Nat | UnOp::Int | UnOp::Real => input,
+                    UnOp::Not => format!("(not {input})"),
+                }
+            }
 
             Expr::Binary(expr) => {
                 let lhs = self.expr(&expr.lhs);
@@ -376,11 +391,11 @@ impl<'a> Codegen<'a> {
     }
 
     fn escape(s: &str) -> String {
-        s.replace("\n", "\\n")
+        s.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
             .replace("\t", "\\t")
             .replace("\r", "\\r")
             .replace("\0", "\\0")
-            .replace("\"", "\\\"")
-            .replace("\\", "\\\\")
     }
 }

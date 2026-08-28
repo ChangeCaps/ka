@@ -1,4 +1,10 @@
 import "std:string"
+import "std:result" as result
+
+type error =
+  | :not-found
+
+type result 'a = result::result 'a error
 
 extern "io::readln" readln is !str
 

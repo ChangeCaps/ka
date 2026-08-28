@@ -1,0 +1,21 @@
+import "std:list"   as list
+import "std:option" as option
+import "std:string" as string
+
+import "ka:parse/token"           as token
+import "ka:diagnostic/diagnostic" as diagnostic
+import "ka:diagnostic/span"       as span
+import "ka:diagnostic/file"       as file
+
+type state = {
+  tokens: list (token, span)
+  eof:    span
+}
+
+type parsed 'a = {
+  value:       'a
+  diagnostics: list diagnostic
+}
+
+type parser 'a = state -> option (parsed 'a, state)
+

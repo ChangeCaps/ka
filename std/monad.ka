@@ -1,9 +1,0 @@
-is ('a -> !'b) -> !'a -> !'b
-bind f m = do
-  let x <- m
-  f x
-
-is !'b -> !'a -> !'b
-then second first = do
-  first
-  second

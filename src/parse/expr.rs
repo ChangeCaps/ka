@@ -17,6 +17,7 @@ pub fn is_expr(token: Token) -> bool {
             | Token::Nat
             | Token::Int
             | Token::Real
+            | Token::Bang
             | Token::Do
             | Token::Colon
             | Token::Back
@@ -415,6 +416,7 @@ fn unary(parser: &mut Parser) -> Expr {
         Token::Nat => UnOp::Nat,
         Token::Int => UnOp::Int,
         Token::Real => UnOp::Real,
+        Token::Bang => UnOp::Not,
 
         _ => return field(parser),
     };

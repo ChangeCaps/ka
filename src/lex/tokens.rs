@@ -129,11 +129,11 @@ impl<'a> Lexer<'a> {
         (0..n).map(|_| self.consume()).sum()
     }
 
-    fn consume_while(&mut self, f: impl Fn(char) -> bool) -> &'a str {
+    fn consume_while(&mut self, mut f: impl FnMut(char) -> bool) -> &'a str {
         let start = self.offset;
         let mut len = 0;
 
-        while self.peek().is_some_and(&f) {
+        while self.peek().is_some_and(&mut f) {
             len += self.consume();
         }
 
@@ -286,7 +286,16 @@ impl<'a> Lexer<'a> {
     fn consume_string(&mut self) -> Token {
         self.consume();
 
-        let string = self.consume_while(|c| !Self::is_string_delimiter(c));
+        let mut is_escape = false;
+        let string = self.consume_while(|c| {
+            if Self::is_string_delimiter(c) && !is_escape {
+                return false;
+            }
+
+            is_escape = c == '\\' && !is_escape;
+
+            true
+        });
 
         let string = string
             .replace("\\n", "\n")

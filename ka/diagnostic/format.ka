@@ -1,0 +1,13 @@
+import "std:string" as string
+import "std:list"   as list
+
+import "ka:diagnostic/diagnostic" as diagnostic
+import "ka:diagnostic/file"       as file
+import "ka:diagnostic/span"       as span
+
+is list diagnostic -> !str
+format-all diagnostics =
+  do diagnostics
+    |> list::map string::format
+    |> string::join "\n"
+

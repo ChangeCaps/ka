@@ -1,9 +1,21 @@
-import "std:io"
+import "std:io" as io
+import "std:fs" as fs
 
 import "ka:parse/lex"
+import "ka:diagnostic/format"
 
 main = do
-  lex 0 "let x = 0"
-    |> debug
+  let input <- fs::read "test/main.ka"
+  let file = { path: "test/main.ka" }
 
-  do {}
+  match input
+    :err _ -> do {}
+    :ok input -> do
+      let state, diagnostics = lex file input
+
+      let f <- format-all diagnostics
+      io::println f
+
+      dump-tokens state.tokens
+
+

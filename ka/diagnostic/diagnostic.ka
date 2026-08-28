@@ -20,7 +20,7 @@ type label = {
 }
 
 is severity -> str -> diagnostic
-empty severity message =
+diagnostic severity message =
   {
     severity: severity
     message: message
@@ -29,10 +29,10 @@ empty severity message =
   }
 
 is str -> diagnostic
-error message = empty (:error) message
+error message = diagnostic (:error) message
 
 is str -> diagnostic
-warning message = empty (:warning) message
+warning message = diagnostic (:warning) message
 
 is span -> str -> diagnostic -> diagnostic
 label span message diagnostic =

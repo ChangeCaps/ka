@@ -91,6 +91,7 @@ impl Compiler {
 
             fs::write("out.lua", lua).unwrap();
 
+            #[cfg(debug_assertions)]
             process::Command::new("stylua")
                 .arg("out.lua")
                 .output()

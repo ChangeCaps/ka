@@ -1,0 +1,7 @@
+import "std:map" as map
+
+import "ka:diagnostic/span" as span
+
+type file = {
+  path: str
+}

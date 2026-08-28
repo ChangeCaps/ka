@@ -1,4 +1,4 @@
-type file = nat
+import "ka:diagnostic/file" as file
 
 type span = {
   file:  file

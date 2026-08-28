@@ -1,8 +1,36 @@
-local global = {}
 local extern = {
   ["io::print"] = function(x)
-    io.write(x)
-  end
+    return function()
+      io.write(x)
+    end
+  end,
+  ["fs::read"] = function(x)
+    return function()
+      local file = io.open(x, "r")
+
+      if file == nil then
+        return {
+          variant = "err",
+          payload = { variant = "not-found" },
+        }
+      end
+
+      local contents = file:read("*a")
+      file:close()
+
+      if contents == nil then
+        return {
+          variant = "err",
+          payload = { variant = "not-found" },
+        }
+      end
+
+      return {
+        variant = "ok",
+        payload = contents,
+      }
+    end
+  end,
 }
 
 local function copy(x)
@@ -59,6 +87,8 @@ local function dynamic(x)
     return { variant = "real'", payload = x }
   elseif type(x) == "string" then
     return { variant = "str'", payload = x }
+  elseif type(x) == "function" then
+    return { variant = "action" }
   end
 end
 
@@ -168,4 +198,8 @@ local function eq(a, b)
   else
     return a == b
   end
+end
+
+local function ne(a, b)
+  return not eq(a, b)
 end

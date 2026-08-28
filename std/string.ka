@@ -42,6 +42,21 @@ contains needle haystack = find needle haystack |> option::is-some
 is str -> str -> str
 append a b = prepend b a
 
+is str -> str -> bool
+starts-with prefix s = trim prefix s != s
+
+is str -> str -> str -> str
+replace a b s = match find a s
+  :none -> s
+  :some n ->
+    let start, rest = split-at n s
+
+    rest
+      |> trim a
+      |> replace a b
+      |> prepend b
+      |> prepend start
+
 is str -> str -> str
 trim prefix s =
   let start, rest = split-at (length prefix) s
@@ -78,7 +93,17 @@ local format-dynamic p x =
       :false -> s
 
   match x
-    :str' s -> s
+    :str' s ->
+      s
+        |> replace "\\" "\\\\"
+        |> replace "\"" "\\\""
+        |> replace "\n" "\\n"
+        |> replace "\r" "\\r"
+        |> replace "\t" "\\t"
+        |> replace "\0" "\\0"
+        |> prepend "\""
+        |> append "\""
+
     :nat' x -> intrinsic::format-nat x
     :int' x -> intrinsic::format-int x
     :real' x -> intrinsic::format-real x

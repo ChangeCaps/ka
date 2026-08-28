@@ -1,0 +1,337 @@
+import "std:option" as option
+import "std:list"   as list
+
+import "ka:diagnostic/span" as span
+
+type module-def =
+  | :import' import-def
+  | :type'   type-def
+  | :global  global-def
+  | :error   span
+
+type def =
+  | :import' import-def
+  | :type'   type-def
+  | :error   span
+
+type ty =
+  | :nat'    nat-ty
+  | :int'    int-ty
+  | :real'   real-ty
+  | :str'    str-ty
+  | :paren   paren-ty
+  | :lambda  lambda-ty
+  | :generic generic-ty
+  | :record  record-ty
+  | :tuple   tuple-ty
+  | :union   union-ty
+  | :alias   alias-ty
+  | :action  action-ty
+  | :error   span
+
+type pat =
+  | :paren   paren-pat
+  | :wild    wild-pat
+  | :bind    bind-pat
+  | :str'    str-pat
+  | :tuple   tuple-pat
+  | :variant variant-pat
+  | :error   span
+
+type expr =
+  | :paren    paren-expr
+  | :nat'     nat-expr
+  | :str'     str-expr
+  | :var      var-expr
+  | :field    field-expr
+  | :with'    with-expr
+  | :call     call-expr
+  | :lambda   lambda-expr
+  | :variant  variant-expr
+  | :record   record-expr
+  | :tuple    tuple-expr
+  | :unary    unary-expr
+  | :binary   binary-expr
+  | :block    block-expr
+  | :do'      do-expr
+  | :do-block do-block-expr
+  | :match'   match-expr
+  | :error    span
+
+type import-def = {
+  path: str
+  name: option str
+  span: span
+}
+
+type type-def = {
+  is-local: bool
+  name:     option str
+  params:   list (option str)
+  ty:       ty
+  span:     span
+}
+
+type global-def = {
+  is-local: bool
+  ty:       option ty
+  pat:      pat
+  params:   list pat
+  input:    expr
+  span:     span
+}
+
+type nat-ty = {
+  span: span
+}
+
+type int-ty = {
+  span: span
+}
+
+type real-ty = {
+  span: span
+}
+
+type str-ty = {
+  span: span
+}
+
+type paren-ty = {
+  ty:   ty
+  span: span
+}
+
+type lambda-ty = {
+  input:  ty
+  output: ty
+  span:   span
+}
+
+type action-ty = {
+  output: ty
+  span:   span
+}
+
+type generic-ty = {
+  name: option str
+  span: span
+}
+
+type tuple-ty = {
+  fields: list ty
+  span:   span
+}
+
+type record-ty = {
+  fields: list ty-field
+  span:   span
+}
+
+type union-ty = {
+  variants: list ty-variant
+  span:     span
+}
+
+type alias-ty = {
+  from: option str
+  name: str
+  args: list ty
+  span: span
+}
+
+type ty-field = {
+  name: option str
+  ty:   ty
+  span: span
+}
+
+type ty-variant = {
+  name: option str
+  ty:   option ty
+  span: span
+}
+
+type paren-pat = {
+  pat:  pat
+  span: span
+}
+
+type wild-pat = {
+  span: span
+}
+
+type bind-pat = {
+  name: str
+  span: span
+}
+
+type str-pat = {
+  value: str
+  span:  span
+}
+
+type tuple-pat = {
+  fields: list pat
+  span:   span
+}
+
+type variant-pat = {
+  name:    option str
+  payload: option pat
+  span:    span
+}
+
+type paren-expr = {
+  expr: expr
+  span: span
+}
+
+type nat-expr = {
+  value: nat
+  span:  span
+}
+
+type str-expr = {
+  value: str
+  span:  span
+}
+
+type var-expr = {
+  from: option str
+  name: str
+  span: span
+}
+
+type field-expr = {
+  input: expr
+  name:  option str
+  span:  span
+}
+
+type with-expr = {
+  input:  expr
+  fields: list expr-field
+  span:   span
+}
+
+type call-expr = {
+  lambda: expr
+  input:  expr
+  span:   span
+}
+
+type lambda-expr = {
+  params: list pat
+  output: expr
+  span:   span
+}
+
+type variant-expr = {
+  name:    option str
+  payload: option expr
+  span:    span
+}
+
+type record-expr = {
+  fields: list expr-field
+  span:   span
+}
+
+type tuple-expr = {
+  fields: list expr
+  span:   span
+}
+
+type unary-expr = {
+  op:    unop
+  input: expr
+  span:  span
+}
+
+type binary-expr = {
+  lhs:  expr
+  op:   binop
+  rhs:  expr
+  span: span
+}
+
+type block-expr = {
+  stmts:  list block-stmt
+  output: expr
+  span:   span
+}
+
+type do-expr = {
+  expr: expr
+  span: span
+}
+
+type do-block-expr = {
+  stmts: list do-block-stmt
+  span:  span
+}
+
+type match-expr = {
+  input: expr
+  arms:  list match-arm
+  span:  span
+}
+
+type block-stmt =
+  | :def def
+  | :let' let'
+
+type do-block-stmt =
+  | :def def
+  | :expr expr
+  | :let' let'
+  | :bind bind
+
+type let' = {
+  ty:     option ty
+  pat:    pat
+  params: list pat
+  input:  expr
+  span:   span
+}
+
+type bind = {
+  ty:     option ty
+  pat:    pat
+  params: list pat
+  input:  expr
+  span:   span
+}
+
+type expr-field = {
+  name: option str
+  expr: expr
+  span: span
+}
+
+type match-arm = {
+  pat:  pat
+  expr: expr
+}
+
+type unop =
+  | :nat'
+  | :int'
+  | :real'
+  | :not'
+
+type binop =
+  | :add
+  | :sub
+  | :mul
+  | :div
+  | :gt
+  | :lt
+  | :ge
+  | :le
+  | :nq
+  | :ne
+  | :land
+  | :lor
+

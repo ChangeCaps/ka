@@ -1,13 +1,13 @@
-import "std:list" as list
+import "std:list"   as list
 
-import "ka:diagnostic/span" as span
+import "ka:diagnostic/span"       as span
 
 type tokens = list (token, span)
 
 type token =
   | :ident str
   | :string str
-  | :number nat
+  | :number str
 
   | :invalid str
   | :whitespace
