@@ -61,7 +61,6 @@ local function copy(x)
   return output
 end
 
-
 local function dynamic(x)
   if type(x) == "table" and x['$item'] ~= nil then
     local function list(y)
@@ -114,6 +113,11 @@ local function dynamic(x)
   elseif type(x) == "function" then
     return variant("action")
   end
+end
+
+local function trace(message, x)
+  io.write(message)
+  return x
 end
 
 local function hashstr(x)

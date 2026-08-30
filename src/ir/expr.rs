@@ -188,6 +188,8 @@ pub struct IntrinsicExpr {
 pub enum Intrinsic {
     Dynamic,
 
+    Trace,
+
     FormatNat,
     FormatInt,
     FormatReal,

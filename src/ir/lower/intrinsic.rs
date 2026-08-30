@@ -13,6 +13,8 @@ impl Lowerer<'_> {
 
         self.add_dynamic();
 
+        self.add_trace();
+
         self.add_format_nat();
         self.add_format_int();
         self.add_format_real();
@@ -100,6 +102,12 @@ impl Lowerer<'_> {
         );
 
         self.add_intrinsic("dynamic", Intrinsic::Dynamic, [input], ty);
+    }
+
+    fn add_trace(&mut self) {
+        let ty = self.add_inferred_type();
+
+        self.add_intrinsic("trace", Intrinsic::Trace, [Ty::Str, ty.clone()], ty);
     }
 
     fn add_format_nat(&mut self) {

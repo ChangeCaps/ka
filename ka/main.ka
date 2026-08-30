@@ -5,6 +5,7 @@ import "std:string"
 import "ka:parse/lex"
 import "ka:parse/parser"
 import "ka:diagnostic/format"
+import "ka:phase/rename"
 import "ka:parse"
 
 main = do
@@ -18,12 +19,17 @@ main = do
     :err _ -> do {}
     :ok input -> do
       let ts, ds = lex file input
+      print-all ds
+
       let ast = parse ts module
 
       match ast
         :none -> do {}
         :some (ast, ds) -> do
           print-all ds
-          debug-pretty ast
+
+          let renamed = rename ["test", ast]
+
+          do {}
 
   do {}

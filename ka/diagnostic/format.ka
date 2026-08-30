@@ -11,14 +11,41 @@ import "ka:diagnostic/span"       as span
 is [diagnostic] -> !{}
 print-all diagnostics = do
   let s <- format-all diagnostics
-  println s
+  print s
 
 is [diagnostic] -> !str
-format-all diagnostics = do
-  let diagnostics <- diagnostics
-    |> each diagnostic
+format-all diagnostics = match diagnostics
+  [] -> do ""
+  _ -> do
+    let formatted <- diagnostics
+      |> each diagnostic
 
-  do join "\n" diagnostics
+    do join "\n\n" formatted
+      |> append "\n\n"
+      |> append (summary diagnostics)
+      |> append "\n"
+
+local summary ds =
+  let es, ws = ds
+    |> fold (0, 0) \es, ws d.
+      match d.severity
+        :error   -> es + 1, ws
+        :warning -> es, ws + 1
+
+  match es > 0
+    :true -> "error"
+      |> red
+      |> bold
+      |> append ": could not compile program due to "
+      |> append (format es)
+      |> append " previous errors"
+
+    :false -> "warning"
+      |> yellow
+      |> bold
+      |> append ": compiled program with "
+      |> append (format ws)
+      |> append " warnings"
 
 local diagnostic d =
   header d

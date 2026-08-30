@@ -1,0 +1,49 @@
+import "std:map"   as map
+import "std:list"  as list
+import "std:debug" as debug
+
+import "ka:ast" as ast
+
+rename modules =
+  let env = {
+    types:     map.empty
+    variables: map.empty
+  }
+
+  let state = {
+    types:   []
+    globals: []
+    imports: map.empty
+
+    next-unique: 0
+    diagnostics: []
+  }
+
+  let state = modules
+    |> list.fold state \state name, _.
+      add-import name state
+    |> debug
+
+  0
+
+add-unique state =
+  let unique = state.next-unique
+
+  let state = state with {
+    next-unique: state.next-unique + 1
+  }
+
+  state, unique
+
+add-import name state =
+  let state, unique = add-unique state
+
+  state with {
+    imports: state.imports
+      |> map.insert name unique
+  }
+
+add-diagnostic diagnostic state =
+  state with {
+    diagnostics: diagnostic :: state.diagnostics
+  }

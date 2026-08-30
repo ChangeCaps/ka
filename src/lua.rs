@@ -133,7 +133,7 @@ impl<'a> Codegen<'a> {
 
                 for field in &expr.fields {
                     let expr = self.expr(&field.expr);
-                    (self.stmts).push(format!("{local}.{} = {}", field.name, expr));
+                    (self.stmts).push(format!("{local}['{}'] = {}", field.name, expr));
                 }
 
                 local
@@ -275,6 +275,13 @@ impl<'a> Codegen<'a> {
                     Intrinsic::Dynamic => {
                         let input = inputs.next().unwrap();
                         format!("dynamic({input})")
+                    }
+
+                    Intrinsic::Trace => {
+                        let message = inputs.next().unwrap();
+                        let input = inputs.next().unwrap();
+
+                        format!("trace({message}, {input})")
                     }
 
                     Intrinsic::FormatNat | Intrinsic::FormatInt | Intrinsic::FormatReal => {
