@@ -115,8 +115,7 @@ impl<'a> Lowerer<'a> {
         });
 
         self.global_defs(global_defs);
-
-        let order = self.resolve_global_dependencies();
+        self.resolve_global_dependencies();
 
         let main = self
             .imports
@@ -136,7 +135,6 @@ impl<'a> Lowerer<'a> {
         let program = Program {
             externs: self.externs,
             globals: self.globals,
-            order,
 
             scopes: self.scopes,
             vars: self.vars,
@@ -241,18 +239,17 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn resolve_global_dependencies(&mut self) -> Vec<Id<Global>> {
+    fn resolve_global_dependencies(&mut self) {
         fn recurse(
             lowerer: &mut Lowerer<'_>,
             global: Id<Global>,
             rec: &mut HashSet<Id<Global>>,
             stack: &mut Vec<Id<Global>>,
-            order: &mut Vec<Id<Global>>,
         ) {
             stack.push(global);
 
             for (dependency, tys) in lowerer.dependencies.remove(&global).into_iter().flatten() {
-                recurse(lowerer, dependency, rec, stack, order);
+                recurse(lowerer, dependency, rec, stack);
 
                 if let Some(i) = stack.iter().rposition(|x| *x == dependency) {
                     for global in stack[i..].iter().copied() {
@@ -276,20 +273,13 @@ impl<'a> Lowerer<'a> {
             }
 
             stack.pop();
-
-            if !order.contains(&global) {
-                order.push(global);
-            }
         }
 
         let mut rec = HashSet::new();
         let mut stack = Vec::new();
-        let mut order = Vec::new();
 
         for global in self.globals.keys().collect::<Vec<_>>() {
-            recurse(self, global, &mut rec, &mut stack, &mut order);
+            recurse(self, global, &mut rec, &mut stack);
         }
-
-        order
     }
 }

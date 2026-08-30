@@ -32,6 +32,7 @@ pub fn expr(parser: &mut Parser) -> Expr {
         Token::Do => r#do(parser),
         Token::Match => r#match(parser),
         Token::Newline => block(parser),
+        Token::Back => lambda(parser),
         _ => pipe(parser),
     }
 }
@@ -392,7 +393,7 @@ fn call(parser: &mut Parser) -> Expr {
 
     while is_expr(parser.peek()) {
         let lambda = Box::new(expr);
-        let input = with(parser);
+        let input = argument(parser);
         let input = Box::new(input);
 
         let span = lambda.span().join(input.span());
@@ -405,6 +406,21 @@ fn call(parser: &mut Parser) -> Expr {
     }
 
     expr
+}
+
+fn argument(parser: &mut Parser) -> Expr {
+    match parser.peek() {
+        Token::Colon => {
+            let span = parser.consume();
+            let span = span.join(parser.span());
+            let name = parser.expect_ident();
+            let expr = None;
+
+            Expr::Variant(VariantExpr { name, expr, span })
+        }
+
+        _ => with(parser),
+    }
 }
 
 fn with(parser: &mut Parser) -> Expr {

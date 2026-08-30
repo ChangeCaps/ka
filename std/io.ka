@@ -15,3 +15,6 @@ println s = s |> append "\n" |> print
 
 is 'a -> !{}
 debug x = x |> format |> println
+
+is 'a -> !{}
+debug-pretty x = x |> format-pretty |> println

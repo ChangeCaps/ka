@@ -1,16 +1,29 @@
 import "std:io" as io
 import "std:fs" as fs
+import "std:string"
 
 import "ka:parse/lex"
+import "ka:parse/parser"
+import "ka:diagnostic/format"
+import "ka:parse"
 
 main = do
   let file = {
     path: "test.ka"
   }
 
-  let ts, ds = lex file "."
+  let input <- fs.read file.path
 
-  debug ts
-  debug ds
+  match input
+    :err _ -> do {}
+    :ok input -> do
+      let ts, ds = lex file input
+      let ast = parse ts module
+
+      match ast
+        :none -> do {}
+        :some (ast, ds) -> do
+          print-all ds
+          debug-pretty ast
 
   do {}

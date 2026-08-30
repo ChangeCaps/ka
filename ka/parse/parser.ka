@@ -1,77 +1,302 @@
-import "std:map" as map
-import "std:list" as list
 import "std:option" as option
+import "std:string" as string
+import "std:list" as list
 
 import "ka:diagnostic/diagnostic"
 import "ka:diagnostic/span"
 import "ka:diagnostic/file"
 import "ka:parse/token"
 
-type state = {
-  file: file
-  eof:  nat
-
-  tokens: [token, nat]
-}
-
-type parsed 'a = {
-  value:       'a
-  diagnostics: [diagnostic]
-}
-
-type follows = [token]
+type follows = {} -> [token]
 
 type parser 'a = {
-  start: [token]
-  parse: follows, state -> option (parsed 'a, state)
+  start: follows -> [token]
+  parse: follows, tokens -> option ('a, tokens, [diagnostic])
 }
 
 is token -> parser token
 token t = {
-  start: [t]
-  parse: \follows, state.
-    let token, tokens = pop state.tokens
-      |> map-some \(t, _), ts. t, ts
-      |> some-or (:eof, [])
+  start: \fs. [t]
+  parse: \_, ts.
+    let fst = next ts.tokens
 
-    let parsed = {
-      value:       token
-      diagnostics: []
-    }
-
-    let state = state with {
-      tokens: tokens
-    }
-
-    match t == token
-      :true -> :some (parsed, state)
+    match is-kind fst t
       :false -> :none
+      :true ->
+        let ts = ts with {
+          tokens: consume ts.tokens
+        }
+
+        :some (fst, ts, [])
 }
+
+is parser 'a
+never = {
+  start: \_. []
+  parse: \_. :none
+}
+
+is parser 'a -> [token]
+start p = p.start \_. []
+
+is token -> parser token
+expect t = {
+  start: \fs. [t]
+  parse: \fs, ts.
+    let n0 = next ts.tokens
+
+    match is-kind n0 t
+      :true ->
+        let ts = ts with {
+          tokens: consume ts.tokens
+        }
+
+        :some (n0, ts, [])
+
+      :false ->
+        let n1   = next (consume ts.tokens)
+        let span = next-span ts
+
+        let diagnostic = "expected `"
+          |> string.append (as-str t)
+          |> string.append "` but found `"
+          |> string.append (as-str n0)
+          |> string.append "`"
+          |> error
+          |> label span "here"
+
+        match is-kind n1 t
+          :true ->
+            let ts = ts with {
+              tokens: ts.tokens
+                |> consume
+                |> consume
+            }
+
+            :some (n1, ts, [diagnostic])
+          :false ->
+            match fs {} |> list.any (is-kind n0)
+              :true -> :some (t, ts, [diagnostic])
+              :false ->
+                match fs {} |> list.any (is-kind n1)
+                  :true ->
+                    let ts = ts with {
+                      tokens: consume ts.tokens
+                    }
+
+                    :some (t, ts, [diagnostic])
+                  :false -> :none
+}
+
+is parser (('a, 'b), 'c) -> parser ('a, 'b, 'c)
+flatten = map \(a, b), c. a, b, c
+
+is parser ((('a, 'b), 'c), 'd) -> parser ('a, 'b, 'c, 'd)
+flatten4 = map \((a, b), c), d. a, b, c, d
+
+is parser (((('a, 'b), 'c), 'd), 'e) -> parser ('a, 'b, 'c, 'd, 'e)
+flatten5 = map \(((a, b), c), d), e. a, b, c, d, e
+
+is parser ((((('a, 'b), 'c), 'd), 'e), 'f) -> parser ('a, 'b, 'c, 'd, 'e, 'f)
+flatten6 = map \((((a, b), c), d), e), f. a, b, c, d, e, f
+
+is ('a -> 'b) -> parser 'a -> parser 'b
+map f = try-map \x. :some f x
+
+is ('a -> option 'b) -> parser 'a -> parser 'b
+try-map f p = {
+  start: p.start
+  parse: \input.
+    p.parse input
+      |> try-map-some \x, ts, ds.
+        f x |> map-some \x. x, ts, ds
+}
+
+is parser 'a -> parser 'a -> parser 'a
+else b a = {
+  start: \fs.
+    let a = a.start fs
+    let b = b.start fs
+    union a b
+  parse: \input.
+    match a.parse input
+      :some output -> :some output
+      :none        -> b.parse input
+}
+
+local union a b = a
+  |> fold b \xs x.
+    match any (is-kind x) b
+      :true -> xs
+      :false -> x :: xs
+
+is parser 'b -> parser 'a -> parser ('a, 'b)
+then b a =
+  let start = \fs. a.start \_. (b.start fs)
+
+  {
+    start: start
+    parse: \fs, ts.
+      a.parse ((\_. b.start fs), ts)
+        |> try-map-some \x, ts, ds.
+          b.parse (fs, ts)
+            |> map-some \y, ts, ds'.
+              (x, y), ts, list.append ds' ds
+  }
+
+is parser 'b -> parser 'a -> parser 'a
+thenl b a = then b a |> map \x, _. x
+
+is parser 'b -> parser 'a -> parser 'b
+thenr b a = then b a |> map \_, x. x
 
 is parser 'a -> parser ('a, span)
 spanned p = {
   start: p.start
-  parse: \follows, state.
-    let offset s = first s.tokens
-      |> map-some \_, x. x
-      |> some-or s.eof
+  parse: \fs, ts.
+    let start = trim ts.tokens
+      |> offset ts.eof
 
-    let start = offset state
-
-    p.parse (follows, state)
-      |> map-some \parsed, state.
-        let end = offset state
-
+    p.parse (fs, ts)
+      |> map-some \x, ts, ds.
+        let end = offset ts.eof ts.tokens
         let span = {
-          file:  state.file
+          file:  ts.file
           start: start
           len:   end - start
         }
 
-        let parsed = {
-          value:       parsed.value, span
-          diagnostics: parsed.diagnostics
+        (x, span), ts, ds
+}
+
+is ({} -> parser 'a) -> parser 'a
+delay p = {
+  start: \fs. (p {}).start fs
+  parse: \input. (p {}).parse input
+}
+
+is 'a -> parser 'a
+some x = {
+  start: \fs. fs {}
+  parse: \_, ts. :some (x, ts, [])
+}
+
+is parser 'a -> parser ['a]
+many1 p = p
+  |> then (many0 p)
+  |> map \x, xs. x :: xs
+
+is parser 'a -> parser ['a]
+many0 p =
+  let many = p
+    |> then (delay \_. many0 p)
+    |> map \x, xs. x :: xs
+    |> else (some [])
+
+  token :eof
+    |> map \_. []
+    |> else many
+
+is token -> parser 'a -> parser ['a]
+many1-until t p = p
+  |> then (many0-until t p)
+  |> map \x, xs. x :: xs
+
+is token -> parser 'a -> parser ['a]
+many0-until t p =
+  let many-until = p
+    |> then (delay \_. many0-until t p)
+    |> map \x, xs. x :: xs
+    |> else (some [])
+
+  (token :eof |> map \_. [])
+    |> else (token t |> map \_. [])
+    |> else many-until
+
+is parser 'a -> parser (option 'a)
+maybe p = p
+  |> map \x. :some x
+  |> else (some (:none))
+
+is str -> [token] -> parser 'a -> parser (option 'a)
+recover s rs p = {
+  start: p.start
+  parse: \fs, ts.
+    match p.parse (fs, ts)
+      :some (x, ts, ds) -> :some (:some x, ts, ds)
+      :none ->
+        let start = ts.tokens
+          |> trim
+          |> offset ts.eof 
+
+        let ts = ts with {
+          tokens: ts.tokens
+            |> consume-while \t. !(list.contains t rs) and t != :eof
         }
 
-        parsed, state
+        let end = offset ts.eof ts.tokens
+
+        let span = {
+          file:  ts.file
+          start: start
+          len:   end - start
+        }
+
+        let diagnostic = "expected `"
+          |> string.append s
+          |> string.append "` "
+          |> error
+          |> label span "here"
+
+        :some (:none, ts, [diagnostic])
 }
+
+local consume-while f ts =
+  match f (next ts)
+    :true -> ts
+      |> consume
+      |> consume-while f
+    :false -> ts
+
+local next ts =
+  match ts
+    (:whitespace, _) :: ts -> next ts
+    (t,           _) :: _  -> t
+    []                     -> :eof
+
+local next-span ts =
+  let start = ts.tokens
+    |> trim
+    |> offset ts.eof
+
+  let end = ts.tokens
+    |> consume
+    |> offset ts.eof
+
+  {
+    file:  ts.file
+    start: start
+    len:   end - start
+  }
+
+local consume ts =
+  trim ts |> skip 1
+
+local trim ts =
+  match ts
+    (:whitespace, _) :: ts -> trim ts
+    _ -> ts
+
+local offset eof ts =
+  first ts
+    |> map-some \_, i. i
+    |> some-or eof
+
+local is-kind a b =
+  match a, b
+    :ident   _, :ident   _ -> :true
+    :string  _, :string  _ -> :true
+    :number  _, :number  _ -> :true
+    :invalid _, :invalid _ -> :true
+
+    _ -> a == b

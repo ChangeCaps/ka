@@ -1,0 +1,959 @@
+import "std:option"
+import "std:list" as list
+
+import "ka:diagnostic/diagnostic"
+import "ka:parse/parser"
+import "ka:parse/token"
+import "ka:ast"
+
+is tokens -> parser 'a -> option ('a, [diagnostic])
+parse ts parser =
+  let parser = parser
+
+  parser.parse ((\_. []), ts)
+    |> map-some \x, _, ds. x, ds
+
+module =
+  newlines0
+    |> thenr (many0 module-def)
+    |> thenl (expect :eof)
+
+is parser module-def
+module-def =
+  def-type
+    |> else def-import
+    |> else def-global
+    |> recover "definition" [:newline]
+    |> thenl expect-newlines
+    |> spanned
+    |> map \x, span.
+      x |> some-or (:error span)
+
+def-import =
+  token :import'
+    |> thenr string
+    |> then (maybe (token :as' |> thenr ident))
+    |> spanned
+    |> flatten
+    |> map \path, name, span.
+      :import' {
+        path: path
+        name: name
+        span: span
+      }
+
+def-type =
+  let param = token :quote
+    |> thenr ident
+
+  token :type'
+    |> thenr ident
+    |> then (many0 param)
+    |> thenl (expect :eq)
+    |> then (expect-ty [:newline] ty)
+    |> spanned
+    |> flatten4
+    |> map \name, params, ty, span.
+      :type' {
+        is-local: :false
+        name:     name
+        params:   params
+        ty:       ty
+        span:     span
+      }
+
+def-global = maybe def-is
+  |> then def-local
+  |> then pat
+  |> then (many0 pat)
+  |> thenl (expect :eq)
+  |> then (expect-expr [:newline] expr)
+  |> spanned
+  |> flatten6
+  |> map \ty, is-local, pat, params, output, span.
+    :global {
+      is-local: is-local
+      ty:       ty
+      pat:      pat
+      params:   params
+      output:   output
+      span:     span
+    }
+
+def-local = token :local'
+  |> maybe
+  |> map is-some
+
+def-is = token :is'
+  |> thenr (expect-ty [:newline] ty)
+  |> thenl expect-newline
+
+expect-ty ts p =
+  recover "type" ts p
+    |> spanned
+    |> map \x, span.
+      x |> some-or (:error span)
+
+is parser ty
+ty = delay \_. ty-lambda
+
+ty-rs = [ 
+  :pipe
+  :comma
+  :semi
+  :close-paren
+  :close-brace
+  :close-bracket
+  :newline
+]
+
+ty-lambda =
+  let rhs = token :right-arrow
+    |> thenr (delay \_. expect-ty ty-rs ty-lambda)
+
+  ty-tuple
+    |> then (maybe rhs)
+    |> spanned
+    |> flatten
+    |> map \input, output, span.
+      match output
+        :none -> input
+        :some output ->
+          :lambda {
+            input:  input
+            output: output
+            span:   span
+          }
+
+ty-tuple =
+  let arg = token :comma
+    |> thenr (expect-ty ty-rs ty-union)
+
+  ty-union
+    |> then (many1 arg)
+    |> map \x, xs. x :: xs
+    |> spanned
+    |> map \fields, span.
+      :tuple {
+        fields: fields
+        span:   span
+      }
+    |> else ty-union
+
+ty-union =
+  let variant = token :colon
+    |> thenr ident
+    |> then (maybe ty)
+    |> spanned
+    |> flatten
+    |> map \name, payload, span.
+      {
+        name:    name
+        payload: payload
+        span:    span
+      }
+
+  let alt = token :pipe
+    |> thenr (variant |> recover "variant" [:pipe; :newline])
+
+  let block = newlines1
+    |> then (token :indent)
+    |> thenr (many1 (alt |> thenl expect-newlines))
+    |> thenl (expect :dedent)
+    |> map \xs. xs |> filter-map \x. x
+
+  variant
+    |> then (many0 alt)
+    |> map \x, xs. xs
+      |> filter-map \x. x
+      |> push x
+    |> else block
+    |> spanned
+    |> map \variants, span.
+      :union {
+        variants: variants
+        span:     span
+      }
+    |> else ty-alias
+
+ty-alias =
+  let name = ident
+    |> then (maybe (token :dot |> thenr ident))
+    |> map \x, y.
+      match y
+        :some y -> :some x, y
+        :none   -> :none  , x
+
+  let simple = name
+    |> spanned
+    |> flatten
+    |> map \from, name, span.
+      :alias {
+        from: from
+        name: name
+        args: []
+        span: span
+      }
+
+  name
+    |> then (many0 (else simple ty-term))
+    |> spanned
+    |> flatten4
+    |> map \from, name, args, span.
+      :alias {
+        from: from
+        name: name
+        args: args 
+        span: span
+      }
+    |> else ty-term
+
+ty-term = ty-paren
+  |> else ty-nat
+  |> else ty-int
+  |> else ty-real
+  |> else ty-str
+  |> else ty-list
+  |> else ty-generic
+  |> else ty-action
+  |> else ty-record
+
+ty-paren =
+  token :open-paren
+    |> thenr (expect-ty ty-rs ty)
+    |> thenl (token :close-paren)
+    |> spanned
+    |> map \ty, span.
+      :paren {
+        ty:   ty
+        span: span
+      }
+
+ty-nat = token :nat'
+  |> spanned
+  |> map \_, span. :nat' { span: span }
+
+ty-int = token :int'
+  |> spanned
+  |> map \_, span. :int' { span: span }
+
+ty-real = token :real'
+  |> spanned
+  |> map \_, span. :real' { span: span }
+
+ty-str = token :str'
+  |> spanned
+  |> map \_, span. :str' { span: span }
+
+ty-list =
+  token :open-bracket
+    |> thenr (expect-ty ty-rs ty)
+    |> thenl (expect :close-bracket)
+    |> spanned
+    |> map \item, span.
+      :list {
+        item: item
+        span: span
+      }
+
+ty-generic = token :quote
+  |> thenr ident
+  |> spanned
+  |> map \name, span.
+    :generic {
+      name: name
+      span: span
+    }
+
+ty-action = token :bang
+  |> thenr ty
+  |> spanned
+  |> map \ty, span.
+    :action {
+      output: ty
+      span:   span
+    }
+
+ty-record =
+  let field = ident
+    |> thenl (expect :colon)
+    |> then (expect-ty ty-rs ty)
+    |> spanned
+    |> flatten
+    |> map \name, ty, span.
+      {
+        name: name
+        ty:   ty
+        span: span
+      }
+
+  let fields = field
+    |> then (many0 (token :semi |> thenr field))
+    |> map \x, xs. x :: xs
+    |> else (some [])
+
+  let block = many1 (token :newline)
+    |> then (token :indent)
+    |> thenr (many1 (field |> thenl expect-newlines))
+    |> thenl (expect :dedent)
+
+  token :open-brace
+    |> thenr (else fields block)
+    |> thenl (expect :close-brace)
+    |> spanned
+    |> map \fields, span.
+      :record {
+        fields: fields
+        span:   span
+      }
+
+expect-pat ts p =
+  recover "pattern" ts p
+    |> spanned
+    |> map \x, span.
+      x |> some-or (:error span)
+
+is parser pat
+pat = delay \_. pat-tuple
+
+pat-tuple =
+  let rs = [
+    :comma
+    :right-arrow
+    :left-arrow
+    :eq
+    :colon-colon
+    :newline
+  ]
+
+  let arg = token :comma
+    |> thenr (expect-pat rs pat-cons)
+
+  pat-cons
+    |> then (many1 arg)
+    |> map \x, xs. x :: xs
+    |> spanned
+    |> map \fields, span.
+      :tuple {
+        fields: fields
+        span:   span
+      }
+    |> else pat-cons
+
+pat-cons =
+  let rs = [
+    :comma
+    :right-arrow
+    :left-arrow
+    :eq
+    :colon-colon
+    :newline
+  ]
+
+  pat-term
+    |> thenl (token :colon-colon)
+    |> then (expect-pat rs (delay \_. pat-cons))
+    |> spanned
+    |> flatten
+    |> map \first, rest, span.
+      :cons {
+        first: first
+        rest:  rest
+        span:  span
+      }
+    |> else pat-term
+
+pat-term = pat-paren
+  |> else pat-wild
+  |> else pat-bind
+  |> else pat-str
+  |> else pat-variant
+  |> else pat-empty
+
+pat-paren =
+  let recover = [
+    :close-paren
+    :newline
+  ]
+
+  token :open-paren
+    |> thenr (expect-pat recover pat)
+    |> thenl (token :close-paren)
+    |> spanned
+    |> map \pat, span.
+      :paren {
+        pat:  pat
+        span: span
+      }
+
+pat-wild = token :under
+  |> spanned
+  |> map \_, span.
+    :wild {
+      span: span
+    }
+
+pat-bind = ident
+  |> spanned
+  |> map \name, span.
+    :bind {
+      name: name
+      span: span
+    }
+
+pat-str = string
+  |> spanned
+  |> map \value, span.
+    :str' {
+      value: value
+      span:  span
+    }
+
+pat-empty = token :open-bracket
+  |> then (expect :close-bracket)
+  |> spanned
+  |> map \_, span.
+    :empty {
+      span: span
+    }
+
+pat-variant = token :colon
+  |> thenr ident
+  |> then (maybe (delay \_. pat-term))
+  |> spanned
+  |> flatten
+  |> map \name, payload, span.
+    :variant {
+      name:    name
+      payload: payload
+      span:    span
+    }
+
+expr-rs = [
+  :dot
+  :with'
+  :and'
+  :or'
+  :eq-eq
+  :bang-eq
+  :colon-colon
+  :plus
+  :minus
+  :star
+  :slash
+  :semi
+  :comma
+  :close-paren
+  :close-brace
+  :close-bracket
+  :newline
+  :dedent
+]
+
+expect-expr rs p =
+  recover "expression" rs p
+    |> spanned
+    |> map \x, span.
+      x |> some-or (:error span)
+
+is parser expr
+expr =
+  delay \_.
+    expr-block
+      |> else expr-match
+      |> else expr-do
+      |> else expr-pipe
+
+expr-do =
+  let operator = token :left-arrow
+    |> else (expect :eq)
+    |> map \t. t == :left-arrow
+
+  let rs = [
+    :left-arrow
+    :eq
+    :newline
+  ]
+
+  let let-or-bind-stmt = maybe def-is
+    |> thenl (token :let')
+    |> then (expect-pat rs pat)
+    |> then (many0 pat)
+    |> then operator
+    |> then (expect-expr [:newline] expr)
+    |> spanned
+    |> flatten6
+    |> map \ty, pat, params, is-bind, input, span.
+      let stmt = {
+        ty:     ty
+        pat:    pat
+        params: params
+        input:  input
+        span:   span
+      }
+
+      match is-bind
+        :true  -> :bind stmt
+        :false -> :let' stmt
+
+  let expr-stmt = expr
+    |> map \expr. :expr expr
+
+  let stmt = let-or-bind-stmt
+    |> else expr-stmt
+    |> recover "statement" [:newline]
+    |> thenl (many1 (token :newline))
+
+  let stmts = newlines0
+    |> then (expect :indent)
+    |> thenr (many1-until :dedent stmt)
+    |> recover "statements" [:newline]
+    |> map (some-or [])
+    |> map \xs. xs |> filter-map \x. x
+    |> spanned
+    |> map \stmts, span.
+      :do-block {
+        stmts: stmts
+        span:  span
+      }
+
+  let block = token :newline
+    |> thenr stmts
+
+  let expr = expect-expr [:newline] expr
+    |> spanned
+    |> map \expr, span.
+      :do' {
+        expr: expr
+        span: span
+      }
+
+  token :do'
+    |> thenr (else expr block)
+
+expr-match =
+  let arm = expect-pat [:right-arrow; :newline] pat
+    |> thenl (expect :right-arrow)
+    |> then (expect-expr [:newline] expr)
+    |> spanned
+    |> flatten
+    |> map \pat, expr, span.
+      {
+        pat:  pat
+        expr: expr
+        span: span
+      }
+    |> recover "match arm" [:newline]
+    |> thenl expect-newlines
+
+  let arms = expect-newlines
+    |> then (expect :indent)
+    |> thenr (many1-until :dedent arm)
+    |> recover "match arms" [:newline]
+    |> map (some-or [])
+    |> map (filter-map \x. x)
+
+  token :match'
+    |> thenr expr
+    |> then arms
+    |> spanned
+    |> flatten
+    |> map \input, arms, span.
+      :match' {
+        input: input
+        arms:  arms
+        span:  span
+      }
+
+expr-block =
+  let stmt = maybe def-is
+    |> thenl (token :let')
+    |> then pat
+    |> then (many0 pat)
+    |> thenl (expect :eq)
+    |> then expr
+    |> thenl expect-newlines
+    |> spanned
+    |> flatten5
+    |> map \ty, pat, params, input, span.
+      {
+        ty:     ty
+        pat:    pat
+        params: params
+        input:  input
+        span:   span
+      }
+
+  many1 (token :newline)
+    |> then (token :indent)
+    |> thenr (many0 stmt)
+    |> then expr
+    |> thenl expect-newlines
+    |> thenl (expect :dedent)
+    |> spanned
+    |> flatten
+    |> map \stmts, output, span.
+      :block {
+        stmts:  stmts
+        output: output
+        span:   span
+      }
+
+expr-pipe =
+  let pipe = token :pipe-right
+    |> thenr expr-apply
+
+  let line = many1 pipe
+    |> thenl expect-newlines
+
+  let block = many1 (token :newline)
+    |> then (token :indent)
+    |> thenr (many1 line)
+    |> thenl (expect :dedent)
+    |> else (some [])
+
+  expr-tuple
+    |> then (many0 pipe)
+    |> then block
+    |> spanned
+    |> flatten4
+    |> map \input, line, block, span.
+      match list.flatten (line :: block)
+        []      -> input
+        lambdas -> :pipe {
+          input:   input
+          lambdas: lambdas
+          span:    span
+        }
+
+expr-tuple =
+  let field = token :comma
+    |> thenr expr-or
+
+  expr-or
+    |> then (many0 field)
+    |> spanned
+    |> flatten
+    |> map \first, fields, span.
+      match fields
+        []     -> first
+        fields -> :tuple {
+          fields: first :: fields
+          span:   span
+        }
+
+expr-or =
+  binary [:or', :lor] expr-and
+
+expr-and =
+  binary [:and', :land] expr-eq
+
+expr-eq =
+  binary [:eq-eq, :eq; :bang-eq, :ne] expr-cmp
+
+expr-cmp =
+  binary [:gt, :gt; :lt, :lt; :gt-eq, :ge; :lt-eq, :le] expr-cons
+
+expr-cons =
+  let rhs = token :colon-colon
+    |> thenr (delay \_. expect-expr expr-rs expr-cons)
+
+  expr-add-sub
+    |> then (maybe rhs)
+    |> spanned
+    |> flatten
+    |> map \first, rest, span.
+      match rest
+        :none -> first
+        :some rest ->
+          :cons {
+            first: first
+            rest:  rest
+            span:  span
+          }
+
+expr-add-sub =
+  binary [:plus, :add; :minus, :sub] expr-mul-div
+
+expr-mul-div =
+  binary [:star, :mul; :slash, :div] expr-variant
+
+local binary ops lhs =
+  let rhs = ops
+    |> fold never \other t, op.
+      token t
+        |> thenr (delay \_. expect-expr expr-rs (binary ops lhs))
+        |> map \rhs. op, rhs
+        |> else other
+
+  lhs
+    |> then (many0 rhs)
+    |> spanned
+    |> flatten
+    |> map \lhs, rhs, span.
+      rhs |> fold lhs \lhs op, rhs.
+        :binary {
+          op:   op
+          lhs:  lhs
+          rhs:  rhs
+          span: span
+        }
+
+expr-variant = token :colon
+  |> thenr ident
+  |> then (maybe (delay \_. expr-variant))
+  |> spanned
+  |> flatten
+  |> map \name, payload, span.
+    :variant {
+      name:    name
+      payload: payload
+      span:    span
+    }
+  |> else expr-apply
+
+expr-apply =
+  let args = token :colon
+    |> thenr ident
+    |> spanned
+    |> map \name, span.
+      :variant {
+        name:    name
+        payload: :none
+        span:    span
+      }
+    |> else expr-unary
+    |> many1
+
+  expr-unary
+    |> then (maybe args)
+    |> spanned
+    |> flatten
+    |> map \lambda, args, span.
+      match args
+        :none -> lambda
+        :some args ->
+          :apply {
+            lambda: lambda
+            args:   args
+            span:   span
+          }
+
+expr-with =
+  let rhs = token :with'
+    |> then (expect :open-brace)
+    |> thenr expr-fields
+    |> thenl (expect :close-brace)
+
+  expr-unary
+    |> then (maybe rhs)
+    |> spanned
+    |> flatten
+    |> map \input, fields, span.
+      match fields
+        :none -> input
+        :some fields ->
+          :with' {
+            input:  input
+            fields: fields
+            span:   span
+          }
+
+expr-unary =
+  let recover = delay \_. expr-unary
+    |> expect-expr expr-rs
+
+  let unary t op = token t
+    |> thenr recover
+    |> spanned
+    |> map \input, span.
+      :unary {
+        op:    op
+        input: input
+        span:  span
+      }
+
+  unary :nat' :nat'
+    |> else (unary :int' :int')
+    |> else (unary :real' :real')
+    |> else (unary :bang :not)
+    |> else expr-field
+
+expr-field =
+  let fields = token :dot
+    |> thenr (recover "{identifier}" expr-rs ident)
+    |> many0
+    |> map filter-some
+
+  expr-term
+    |> then fields
+    |> spanned
+    |> flatten
+    |> map \input, fields, span.
+      fields |> fold input \input name.
+        :field {
+          input: input
+          name:  name
+          span:  span
+        }
+
+expr-term = expr-var
+  |> else expr-nat'
+  |> else expr-str'
+  |> else expr-paren
+  |> else expr-list
+  |> else expr-lambda
+  |> else expr-record
+
+expr-var = ident
+  |> spanned
+  |> map \name, span.
+    :var {
+      name: name
+      span: span
+    }
+
+expr-str' = string
+  |> spanned
+  |> map \value, span.
+    :str' {
+      value: value
+      span:  span
+    }
+
+expr-nat' = number
+  |> spanned
+  |> map \value, span.
+    :nat' {
+      value: value
+      span:  span
+    }
+
+expr-paren =
+  token :open-paren
+    |> thenr (expect-expr expr-rs expr)
+    |> thenl (expect :close-paren)
+    |> spanned
+    |> map \expr, span.
+      :paren {
+        expr: expr
+        span: span
+      }
+
+expr-list =
+  let arg = token :semi
+    |> thenr (expect-expr expr-rs expr)
+
+  let args = expect-expr expr-rs expr
+    |> then (many0 arg)
+    |> map \x, xs. x :: xs
+
+  let block = newlines1
+    |> then (expect :indent)
+    |> thenr (many1-until :dedent (expect-expr expr-rs expr |> thenl expect-newlines))
+    |> thenl expect-newlines
+
+  let empty = token :open-bracket
+    |> then (token :close-bracket)
+    |> spanned
+    |> map \_, span.
+      :list {
+        items: []
+        span:  span
+      }
+
+  let non-empty = token :open-bracket
+    |> thenr block
+    |> thenl (expect :close-bracket)
+    |> spanned
+    |> map \items, span.
+      :list {
+        items: items
+        span:  span
+      }
+
+  empty |> else non-empty
+
+expr-lambda = token :back
+  |> thenr (many1 pat)
+  |> thenl (expect :dot)
+  |> then (expect-expr expr-rs expr)
+  |> spanned
+  |> flatten
+  |> map \params, output, span.
+    :lambda {
+      params: params
+      output: output
+      span:   span
+    }
+
+expr-record =
+  token :open-brace
+    |> thenr expr-fields
+    |> thenl (expect :close-brace)
+    |> spanned
+    |> map \fields, span.
+      :record {
+        fields: fields
+        span:   span
+      }
+
+expr-fields =
+  let field = ident
+    |> thenl (expect :colon)
+    |> then (expect-expr expr-rs expr)
+    |> spanned
+    |> flatten
+    |> map \name, expr, span.
+      {
+        name: name
+        expr: expr
+        span: span
+      }
+    |> thenl expect-newlines
+
+  let fields = field
+    |> then (many0 (token :semi |> thenr field))
+    |> map \x, xs. x :: xs
+    |> else (some [])
+
+  let block = newlines1
+    |> then (token :indent)
+    |> thenr (many1 field)
+    |> thenl (expect :dedent)
+    |> thenl expect-newlines
+
+  else fields block
+
+number = token (:number "")
+  |> try-map \t.
+    match t
+      :number s -> :some s
+      _         -> :none
+
+string = token (:string "")
+  |> try-map \t.
+    match t
+      :string s -> :some s
+      _         -> :none
+
+ident = token (:ident "")
+  |> try-map \t.
+    match t
+      :ident s -> :some s
+      _        -> :none
+
+expect-newline =
+  let recover = recover "{newline}" [:newline] never
+    |> then (token :newline)
+    |> map \_. :newline
+
+  token :newline
+    |> else recover
+
+expect-newlines =
+  expect-newline
+    |> then newlines0
+
+newlines1 = many1 (token :newline)
+newlines0 = many0 (token :newline)

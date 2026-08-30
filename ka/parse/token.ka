@@ -1,3 +1,13 @@
+import "std:string" as string
+
+import "ka:diagnostic/file"
+
+type tokens = {
+  file:   file
+  eof:    nat
+  tokens: [token, nat]
+}
+
 type token =
   | :ident str
   | :string str
@@ -60,3 +70,67 @@ type token =
   | :bang-eq
   | :gt-eq
   | :lt-eq
+
+is token -> str
+as-str token = match token 
+  :ident s   -> s
+  :number s  -> s
+  :invalid s -> s
+  :string s  -> s |> string.prepend "\"" |> string.append "\""
+
+  :whitespace -> "{whitespace}"
+  :newline    -> "{newline}"
+  :indent     -> "{indent}"
+  :dedent     -> "{dedent}"
+  :eof        -> "{end of file}"
+
+  :and'    -> "and"
+  :as'     -> "as"
+  :do'     -> "do"
+  :extern' -> "extern"
+  :import' -> "import"
+  :int'    -> "int"
+  :is'     -> "is"
+  :let'    -> "let"
+  :local'  -> "local"
+  :match'  -> "match"
+  :nat'    -> "nat"
+  :real'   -> "real"
+  :or'     -> "or"
+  :str'    -> "str"
+  :type'   -> "type"
+  :with'   -> "with"
+
+  :eq    -> "="
+  :colon -> ":"
+  :semi  -> ";"
+  :dot   -> "."
+  :comma -> ","
+  :plus  -> "+"
+  :minus -> "-"
+  :star  -> "*"
+  :slash -> "/"
+  :gt    -> ">"
+  :lt    -> "<"
+  :pipe  -> "|"
+  :bang  -> "!"
+  :under -> "_"
+  :back  -> "\\"
+  :quote -> "'"
+
+  :open-paren    -> "("
+  :open-brace    -> "{"
+  :open-bracket  -> "["
+  :close-paren   -> ")"
+  :close-brace   -> "}"
+  :close-bracket -> "]"
+
+  :colon-colon -> "::"
+  :right-arrow -> "->"
+  :left-arrow  -> "<-"
+  :pipe-right  -> "|>"
+  :pipe-left   -> "<|"
+  :eq-eq       -> "=="
+  :bang-eq     -> "!="
+  :gt-eq       -> ">="
+  :lt-eq       -> "<="

@@ -8,7 +8,12 @@ use crate::{
 pub fn is_pat(token: Token) -> bool {
     matches!(
         token,
-        Token::Ident(..) | Token::Colon | Token::Under | Token::OpenParen
+        Token::Ident(..)
+            | Token::String(..)
+            | Token::Colon
+            | Token::Under
+            | Token::OpenParen
+            | Token::OpenBracket
     )
 }
 

@@ -2,7 +2,7 @@
 
 pkgs.mkShell {
   buildInputs = [
-    pkgs.lua
+    pkgs.luajit
     pkgs.stylua
   ];
 }

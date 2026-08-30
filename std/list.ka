@@ -25,11 +25,19 @@ filter f xs = match xs
     :true -> x :: filter f xs
   [] -> []
 
+is [option 'a] -> ['a]
+filter-some xs = match xs
+  x :: xs -> match x
+    :some x -> x :: filter-some xs
+    :none -> filter-some xs
+  [] -> []
+
 is ('a -> option 'b) -> ['a] -> ['b]
-filter-map f xs = match xs
-  x :: xs -> match f x
-    :some x -> x :: filter-map f xs
-    :none -> filter-map f xs
+filter-map f xs = xs |> map f |> filter-some
+
+is [['a]] -> ['a]
+flatten xss = match xss
+  xs :: xss -> append (flatten xss) xs
   [] -> []
 
 is ['a] -> ['a]
@@ -38,7 +46,7 @@ reverse xs = extend-reversed xs []
 is ['a] -> ['a] -> ['a]
 append ys xs = match xs
   x :: xs -> x :: append ys xs
-  [] -> xs
+  [] -> ys
 
 is ('a -> bool) -> ['a] -> option 'a
 find f xs = match xs
@@ -88,5 +96,5 @@ nth n xs = skip n xs |> first
 
 is ['a] -> ['a] -> ['a]
 local extend-reversed ys xs = match ys
-  y :: ys -> y :: extend-reversed ys xs
+  y :: ys -> extend-reversed ys (y :: xs)
   [] -> xs

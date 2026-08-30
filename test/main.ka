@@ -1,4 +1,9 @@
 import "std:io"
+import "std:dynamic"
+import "std:string" as string
 
 main = do
-  debug [0; 1; 2]
+  string.split-at 3 "jaklsdfxjklfdsa"
+    |> debug
+
+  do {}

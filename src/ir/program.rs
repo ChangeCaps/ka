@@ -9,7 +9,6 @@ use crate::{
 pub struct Program {
     pub externs: Arena<Extern>,
     pub globals: Arena<Global>,
-    pub order: Vec<Id<Global>>,
 
     pub scopes: Arena<Scope>,
     pub vars: Arena<Var>,

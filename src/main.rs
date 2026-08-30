@@ -97,7 +97,7 @@ impl Compiler {
                 .output()
                 .unwrap();
 
-            process::Command::new("lua")
+            process::Command::new("luajit")
                 .arg("out.lua")
                 .stdin(process::Stdio::inherit())
                 .stdout(process::Stdio::inherit())

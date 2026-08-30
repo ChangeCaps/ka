@@ -1,13 +1,128 @@
-import "std:string" as string
+import "std:io"     as io
+import "std:fs"     as fs
+import "std:math"   as math
 import "std:list"   as list
+import "std:string" as string
 
 import "ka:diagnostic/diagnostic" as diagnostic
 import "ka:diagnostic/file"       as file
 import "ka:diagnostic/span"       as span
 
-is [diagnostic] -> !str
-format-all diagnostics =
-  do diagnostics
-    |> list.map string.format
-    |> string.join "\n"
+is [diagnostic] -> !{}
+print-all diagnostics = do
+  let s <- format-all diagnostics
+  println s
 
+is [diagnostic] -> !str
+format-all diagnostics = do
+  let diagnostics <- diagnostics
+    |> each diagnostic
+
+  do join "\n" diagnostics
+
+local diagnostic d =
+  header d
+
+local header d = do
+  let severity = match d.severity
+    :error   -> "error" |> bold |> red
+    :warning -> "warning" |> bold |> yellow
+
+  let labels <- d.labels
+    |> each (label d)
+
+  do severity
+    |> append (bold ": ")
+    |> append (bold d.message)
+    |> append "\n"
+    |> append (join "\n" labels)
+
+local label d l = do
+  let source <- source l.span.file
+
+  let line, line-start, line-len = split "\n" source
+    |> find-line 1 0 l.span.start
+
+  let column = 1 + l.span.start - line-start
+
+  let line-str = format line
+  let column-str = format column
+  let spaces = length line-str + 1
+
+  let file = repeat (spaces - 1) " "
+    |> append ("-->" |> blue |> bold)
+    |> append " "
+    |> append l.span.file.path
+    |> append ":"
+    |> append line-str
+    |> append ":"
+    |> append column-str
+  
+  let spacer = repeat spaces " "
+    |> append ("|" |> blue |> bold)
+
+  let code = line-str |> blue |> bold
+    |> append " "
+    |> append ("|" |> blue |> bold)
+    |> append " "
+    |> append (sub line-start line-len source)
+
+  let highlight-end = math.min (line-start + line-len) (l.span.start + l.span.len)
+  let highlight = max 1 (highlight-end - l.span.start)
+
+  let highlight = repeat highlight "^"
+    |> append " "
+    |> append l.message
+    |> color d.severity
+    |> bold
+
+  let label = repeat spaces " "
+    |> append ("|" |> blue |> bold)
+    |> append (repeat column " ")
+    |> append highlight
+
+  do file
+    |> append "\n"
+    |> append spacer
+    |> append "\n"
+    |> append code
+    |> append "\n"
+    |> append label
+
+local find-line n s i ls =
+  match ls
+    l :: ls ->
+      let e = s + length l
+
+      match e >= i
+        :true -> n, s, length l
+        :false -> find-line (n + 1) (e + 1) i ls
+    [] -> n, s, 0
+
+local source file = do
+  let source <- fs.read file.path
+
+  do match source
+    :ok  s -> s
+    :err e -> ""
+
+local color severity =
+  match severity
+    :error   -> red
+    :warning -> yellow
+
+local red    = ansi 31
+local yellow = ansi 33
+local blue   = ansi 34
+local bold   = ansi 1
+
+local ansi code s =
+  ansi-code code
+    |> append s
+    |> append (ansi-code 0)
+
+local ansi-code code =
+  ansi-escape
+    |> append "["
+    |> append (string.format code)
+    |> append "m"

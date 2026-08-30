@@ -10,12 +10,11 @@ pub fn codegen(program: &Program, main: Id<Var>) -> String {
     let mut output = String::from(include_str!("prelude.lua"));
 
     for (id, global) in program.globals.iter() {
-        let var = format!("GLOBAL{}", id.index());
+        let var = format!("GLOBAL{}()", id.index());
         codegen.pat(&global.pat, var);
     }
 
-    for id in program.order.iter().copied() {
-        let global = &program.globals[id];
+    for (id, global) in program.globals.iter() {
         let len = codegen.push_scope();
         let expr = codegen.expr(&global.expr);
 
@@ -23,8 +22,13 @@ pub fn codegen(program: &Program, main: Id<Var>) -> String {
             output += &format!("-- {}\n", program.vars[pat.var].name);
         }
 
-        output += &codegen.pop_scope(len);
-        output += &format!("GLOBAL{} = {}", id.index(), expr);
+        output += &format!(
+            "GLOBAL{} = lazy(function() {} return {} end)",
+            id.index(),
+            codegen.pop_scope(len),
+            expr,
+        );
+
         output += "\n\n";
     }
 
@@ -137,7 +141,7 @@ impl<'a> Codegen<'a> {
 
             Expr::Field(expr) => {
                 let input = self.expr(&expr.input);
-                format!("{input}.{}", expr.name)
+                format!("{input}['{}']", expr.name)
             }
 
             Expr::Lambda(expr) => {
@@ -183,7 +187,7 @@ impl<'a> Codegen<'a> {
                     .iter()
                     .map(|field| {
                         let expr = self.expr(&field.expr);
-                        format!("{} = {}", field.name, expr)
+                        format!("['{}'] = {}", field.name, expr)
                     })
                     .collect::<Vec<_>>()
                     .join(", ");

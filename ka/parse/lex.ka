@@ -7,37 +7,245 @@ import "ka:diagnostic/file"
 import "ka:diagnostic/span"
 import "ka:parse/token"
 
-is file -> str -> [token, nat], [diagnostic]
+is file -> str -> tokens, [diagnostic]
 lex file input =
   let state = {
     file:      file
     offset:    0
+    indent:    []
     remaining: input
   }
 
-  let state, ts, ds = token state [] []
+  let ts, ds = line state [] []
 
-  ts, ds
+  let tokens = {
+    file:   file
+    eof:    length input
+    tokens: reverse ts
+  }
 
-is state -> state, token
-local token state =
-  symbol state
-    |> some-or (invalid state)
+  tokens, ds
 
 local type state = {
   file:      file
   offset:    nat
+  indent:    [str]
   remaining: str
 }
 
-local symbol state =
-  symbols
-    |> list.find \s, _. starts-with s state.remaining
-    |> map-some \s, t.
-      let n = length s
-      advance n state, t
+local tokens state ts ds =
+  match first state.remaining
+    :none -> ts, ds
 
-local invalid state =
+    :some "\n" ->
+      let i = state.offset
+      let state = advance 1 state
+      let ts = (:newline, i) :: ts
+
+      line state ts ds
+
+    :some _ ->
+      let state, ts, ds = token state ts ds
+      tokens state ts ds
+
+local line state ts ds =
+  let whitespace = state.remaining
+    |> take-while is-whitespace
+
+  match :some length whitespace == find "\n" state.remaining
+    :true ->
+      let state = advance (length whitespace) state
+      tokens state ts ds
+
+    :false ->
+      let state, n, ds = skip-indents state (reverse state.indent) ds
+      let state, ts = pop-indent state ts n
+      let state, ts = push-indent state ts
+      tokens state ts ds
+
+local skip-indents state xs ds = match xs
+  [] -> state, 0, ds
+  x :: xs ->
+    match starts-with x state.remaining
+      :true ->
+        let n = length x
+        let state = advance n state
+        skip-indents state xs ds
+
+      :false ->
+        let whitespace = state.remaining
+          |> take-while is-whitespace
+
+        match whitespace
+          "" -> state, count xs + 1, ds
+          _  ->
+            let n = length whitespace
+            let span = {
+              file:  state.file
+              start: state.offset
+              len:   n
+            }
+
+            let diagnostic = error "invalid indentation"
+              |> label span "found here"
+
+            advance n state, count xs, diagnostic :: ds
+
+local pop-indent state ts n =
+  match n > 0
+    :false -> state, ts
+    :true ->
+      let state = state with {
+        indent: skip 1 state.indent
+      }
+
+      let i = state.offset
+      let ts = (:newline, i) :: (:dedent, i) :: ts
+      pop-indent state ts (n - 1)
+
+local push-indent state ts =
+  let s = state.remaining
+    |> take-while is-whitespace
+
+  match s
+    "" -> state, ts
+    _  ->
+      let n = length s
+      let i = state.offset
+
+      let state = state with {
+        indent: s :: state.indent
+      }
+
+      advance n state, (:indent, i) :: ts
+
+local token state ts ds =
+  let i = state.offset
+  let state, t = token-whitespace state
+    |> some-else (token-ident state)
+    |> some-else (token-number state)
+    |> some-else (token-string state)
+    |> some-else (token-symbol state)
+    |> some-or (token-invalid state)
+
+  let ts = (t, i) :: ts
+
+  let ds = match t
+    :invalid s ->
+      let span = {
+        file:  state.file
+        start: i
+        len:   state.offset - i
+      }
+
+      let d = "invalid character `"
+        |> append s
+        |> append "`"
+        |> error
+        |> label span "found here"
+
+      d :: ds
+    _ -> ds
+
+  state, ts, ds
+
+local token-whitespace state =
+  let is-token = first state.remaining
+    |> is-some-and is-whitespace
+
+  match is-token
+    :false -> :none
+    :true ->
+      let s = state.remaining
+        |> take-while is-whitespace
+
+      let n = length s
+      :some (advance n state, :whitespace)
+
+local token-ident state =
+  let is-token = first state.remaining
+    |> is-some-and is-ident-start
+
+  match is-token
+    :false -> :none
+    :true ->
+      let s = state.remaining
+        |> take-while is-ident-continue
+
+      let n = length s
+      let t = keywords s
+        |> some-or (:ident s)
+
+      :some (advance n state, t)
+
+local token-number state =
+  let is-token = first state.remaining
+    |> is-some-and is-digit
+
+  match is-token
+    :false -> :none
+    :true ->
+      let s = state.remaining
+        |> take-while is-digit
+
+      let n = length s
+      :some (advance n state, :number s)
+
+local token-string state =
+  let is-token = first state.remaining
+    |> is-some-and \c. c == "\""
+
+  match is-token
+    :false -> :none
+    :true ->
+      let state = advance 1 state
+      let s = state.remaining
+        |> take-string
+
+      let n = length s + 1
+      :some (advance n state, :string s)
+
+local take-string s =
+  match pop s
+    :some ("\"", s) -> ""
+    :some ("\\", s) ->
+      match pop s
+        :none -> ""
+        :some (c, s) -> 
+          let escape = match c
+            "\\" -> :some "\\"
+            "\"" -> :some "\""
+            "n"  -> :some "\n"
+            "r"  -> :some "\r"
+            "t"  -> :some "\t"
+            "0"  -> :some "\0"
+            _    -> :none
+
+          match escape
+            :some e ->
+              take-string s
+                |> prepend e
+
+            :none ->
+              take-string s
+
+    :some (c, s) ->
+      take-string s
+        |> prepend c
+
+    :none -> ""
+
+local token-symbol state =
+  let n2, _ = split-at 2 state.remaining
+  let n1, _ = split-at 1 state.remaining
+
+  match symbols n2
+    :some t -> :some (advance 2 state, t)
+    :none   -> match symbols n1
+      :some t -> :some (advance 1 state, t)
+      :none   -> :none
+
+local token-invalid state =
   let s, _ = split-at 1 state.remaining
   advance 1 state, :invalid s
 
@@ -49,7 +257,74 @@ local advance n state =
     remaining: remaining
   }
 
-is [str, token]
-local symbols = [
-  "::", :colon-colon
-]
+local take-while f s =
+  match pop s
+    :some (char, rest) ->
+      match f char
+        :true -> take-while f rest |> prepend char
+        :false -> ""
+    :none -> ""
+
+local digits = "0123456789"
+local alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+local is-digit c = contains c digits
+local is-alphabetic c = contains c alphabet
+local is-whitespace c = c == " "
+local is-newline c = "\n"
+
+local is-ident-start c = is-alphabetic c
+local is-ident-continue c = is-ident-start c or is-digit c or c == "-" or c == "'"
+
+local symbols s = match s
+  "::" -> :some (:colon-colon)
+  "->" -> :some (:right-arrow)
+  "<-" -> :some (:left-arrow)
+  "|>" -> :some (:pipe-right)
+  "<|" -> :some (:pipe-left)
+  "==" -> :some (:eq-eq)
+  "!=" -> :some (:bang-eq)
+  ">=" -> :some (:gt-eq)
+  "<=" -> :some (:lt-eq)
+  "\\" -> :some (:back)
+  "="  -> :some (:eq)
+  ":"  -> :some (:colon)
+  ";"  -> :some (:semi)
+  "."  -> :some (:dot)
+  ","  -> :some (:comma)
+  "+"  -> :some (:plus)
+  "-"  -> :some (:minus)
+  "*"  -> :some (:star)
+  "/"  -> :some (:slash)
+  ">"  -> :some (:gt)
+  "<"  -> :some (:lt)
+  "|"  -> :some (:pipe)
+  "!"  -> :some (:bang)
+  "_"  -> :some (:under)
+  "'"  -> :some (:quote)
+  "("  -> :some (:open-paren)
+  "{"  -> :some (:open-brace)
+  "["  -> :some (:open-bracket)
+  ")"  -> :some (:close-paren)
+  "}"  -> :some (:close-brace)
+  "]"  -> :some (:close-bracket)
+  _    -> :none
+
+local keywords s = match s
+  "and"    -> :some (:and')
+  "as"     -> :some (:as')
+  "do"     -> :some (:do')
+  "extern" -> :some (:extern')
+  "import" -> :some (:import')
+  "int"    -> :some (:int')
+  "is"     -> :some (:is')
+  "let"    -> :some (:let')
+  "local"  -> :some (:local')
+  "match"  -> :some (:match')
+  "nat"    -> :some (:nat')
+  "real"   -> :some (:real')
+  "or"     -> :some (:or')
+  "str"    -> :some (:str')
+  "type"   -> :some (:type')
+  "with"   -> :some (:with')
+  _        -> :none

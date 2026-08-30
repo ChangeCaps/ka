@@ -65,7 +65,7 @@ local insert-hashed hash key value map =
         }
 
 local get-hashed hash key map =
-  map |> some-and \node.
+  map |> try-map-some \node.
     match node.key == key
       :true -> :some node.value
       :false -> match hash > node.hash
@@ -73,7 +73,7 @@ local get-hashed hash key map =
         :false -> get-hashed hash key node.lhs
 
 local remove-hashed hash key map =
-  map |> some-and \node.
+  map |> try-map-some \node.
     match node.hash == hash and node.key == key
       :true -> match node.lhs, node.rhs
         :none, :none -> :none

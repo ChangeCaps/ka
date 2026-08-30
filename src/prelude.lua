@@ -36,7 +36,20 @@ local extern = {
       return variant("ok", contents)
     end
   end,
+  ["string::ansi-escape"] = "\x1b",
 }
+
+local function lazy(f)
+  local value = nil
+
+  return function()
+    if value == nil then
+      value = f()
+    end
+
+    return value
+  end
+end
 
 local function copy(x)
   local output = {}
@@ -47,6 +60,7 @@ local function copy(x)
 
   return output
 end
+
 
 local function dynamic(x)
   if type(x) == "table" and x['$item'] ~= nil then
@@ -64,13 +78,13 @@ local function dynamic(x)
   elseif type(x) == "table" and x['$variant'] ~= nil then
     local payload
 
-    if x.payload ~= nil then
-      payload = variant("some", dynamic(x.payload))
+    if x['$payload'] ~= nil then
+      payload = variant("some", dynamic(x['$payload']))
     else
       payload = variant("none")
     end
 
-    return variant("variant", payload)
+    return variant("variant", { x['$variant'], payload })
   elseif type(x) == "table" and x[1] ~= nil then
     local fields = nil
 
@@ -88,6 +102,11 @@ local function dynamic(x)
 
     return variant("record", fields)
   elseif type(x) == "boolean" then
+    if x then
+      return variant("variant", { "true", variant("none") })
+    else
+      return variant("variant", { "false", variant("none") })
+    end
   elseif type(x) == "number" then
     return variant("real'", x)
   elseif type(x) == "string" then
@@ -163,13 +182,13 @@ local function byte_to_utf8(x, b)
 end
 
 local function strlength(x)
-  local length = 0
+  -- local length = 0
 
-  for _ in utf8_chars(x) do
-    length = length + 1
-  end
+  -- for _ in utf8_chars(x) do
+  --   length = length + 1
+  -- end
 
-  return length
+  return #x
 end
 
 local function strsplitat(x, i)
@@ -179,6 +198,7 @@ local function strsplitat(x, i)
 end
 
 local function strfind(haystack, needle)
+  needle = needle:gsub("([%(%)%.%%%+%-%*%?%[%^%$])", "%%%1")
   local b = string.find(haystack, needle)
 
   if b == nil then

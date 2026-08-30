@@ -3,6 +3,10 @@ import "std:list"   as list
 
 import "ka:diagnostic/span" as span
 
+type module = {
+  defs: [module-def]
+}
+
 type module-def =
   | :import' import-def
   | :type'   type-def
@@ -20,6 +24,7 @@ type ty =
   | :real'   real-ty
   | :str'    str-ty
   | :paren   paren-ty
+  | :list    list-ty
   | :lambda  lambda-ty
   | :generic generic-ty
   | :record  record-ty
@@ -34,6 +39,8 @@ type pat =
   | :wild    wild-pat
   | :bind    bind-pat
   | :str'    str-pat
+  | :empty   empty-pat
+  | :cons    cons-pat
   | :tuple   tuple-pat
   | :variant variant-pat
   | :error   span
@@ -45,8 +52,11 @@ type expr =
   | :var      var-expr
   | :field    field-expr
   | :with'    with-expr
-  | :call     call-expr
+  | :apply    apply-expr
+  | :pipe     pipe-expr
   | :lambda   lambda-expr
+  | :list     list-expr
+  | :cons     cons-expr
   | :variant  variant-expr
   | :record   record-expr
   | :tuple    tuple-expr
@@ -77,7 +87,7 @@ type global-def = {
   ty:       option ty
   pat:      pat
   params:   [pat]
-  input:    expr
+  output:   expr
   span:     span
 }
 
@@ -99,6 +109,11 @@ type str-ty = {
 
 type paren-ty = {
   ty:   ty
+  span: span
+}
+
+type list-ty = {
+  item: ty
   span: span
 }
 
@@ -171,6 +186,16 @@ type str-pat = {
   span:  span
 }
 
+type empty-pat = {
+  span: span
+}
+
+type cons-pat = {
+  first: pat
+  rest:  pat
+  span:  span
+}
+
 type tuple-pat = {
   fields: [pat]
   span:   span
@@ -188,7 +213,7 @@ type paren-expr = {
 }
 
 type nat-expr = {
-  value: nat
+  value: str
   span:  span
 }
 
@@ -204,7 +229,7 @@ type var-expr = {
 
 type field-expr = {
   input: expr
-  name:  option str
+  name:  str
   span:  span
 }
 
@@ -214,16 +239,33 @@ type with-expr = {
   span:   span
 }
 
-type call-expr = {
+type apply-expr = {
   lambda: expr
-  input:  expr
+  args:   [expr]
   span:   span
+}
+
+type pipe-expr = {
+  input:   expr
+  lambdas: [expr]
+  span:    span
 }
 
 type lambda-expr = {
   params: [pat]
   output: expr
   span:   span
+}
+
+type list-expr = {
+  items: [expr]
+  span:  span
+}
+
+type cons-expr = {
+  first: expr
+  rest:  expr
+  span:  span
 }
 
 type variant-expr = {
@@ -256,7 +298,7 @@ type binary-expr = {
 }
 
 type block-expr = {
-  stmts:  [block-stmt]
+  stmts:  [let']
   output: expr
   span:   span
 }
@@ -277,15 +319,10 @@ type match-expr = {
   span:  span
 }
 
-type block-stmt =
-  | :def def
-  | :let' let'
-
 type do-block-stmt =
-  | :def def
-  | :expr expr
   | :let' let'
   | :bind bind
+  | :expr expr
 
 type let' = {
   ty:     option ty
@@ -312,13 +349,14 @@ type expr-field = {
 type match-arm = {
   pat:  pat
   expr: expr
+  span: span
 }
 
 type unop =
   | :nat'
   | :int'
   | :real'
-  | :not'
+  | :not
 
 type binop =
   | :add
@@ -329,7 +367,7 @@ type binop =
   | :lt
   | :ge
   | :le
-  | :nq
+  | :eq
   | :ne
   | :land
   | :lor

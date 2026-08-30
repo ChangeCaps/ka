@@ -4,20 +4,32 @@ import "std:dynamic"
 
 import "intrinsic" as intrinsic
 
+extern "string::ansi-escape" ansi-escape is str
+
 is str -> nat
 length x = intrinsic.str-length x
 
 is str -> bool
-is-empty x = length x == 0
+is-empty x = x == ""
 
 is 'a -> str
 format x = format-dynamic 0 (dynamic x)
+
+is 'a -> str
+format-pretty x = format-dynamic-pretty 1 0 (dynamic x)
 
 is str -> str -> str
 prepend a b = intrinsic.str-prepend (a, b)
 
 is nat -> str -> str, str
 split-at n s = intrinsic.str-split-at (s, n)
+
+is nat -> nat -> str -> str
+sub start length s =
+  let _, rest   = split-at start s
+  let output, _ = split-at length rest
+
+  output
 
 is str -> option (str, str)
 pop s = match is-empty s
@@ -43,6 +55,12 @@ append a b = prepend b a
 
 is str -> str -> bool
 starts-with prefix s = trim prefix s != s
+
+is nat -> str -> str
+repeat n s =
+  match n > 0
+    :true -> repeat (n - 1) s |> append s
+    :false -> ""
 
 is str -> str -> str -> str
 replace a b s = match find a s
@@ -134,4 +152,66 @@ local format-dynamic p x =
         |> prepend ":"
         |> append " "
         |> append (format-dynamic 1 x)
+        |> paren p 1
+
+local format-dynamic-pretty l p x =
+  let paren p p' s =
+    match p > p'
+      :true -> s |> prepend "(" |> append ")"
+      :false -> s
+
+  let line n = "  "
+    |> repeat n
+    |> prepend "\n"
+
+  match x
+    :str' s ->
+      s
+        |> replace "\\" "\\\\"
+        |> replace "\"" "\\\""
+        |> replace "\n" "\\n"
+        |> replace "\r" "\\r"
+        |> replace "\t" "\\t"
+        |> replace "\0" "\\0"
+        |> prepend "\""
+        |> append "\""
+
+    :nat' x -> intrinsic.format-nat x
+    :int' x -> intrinsic.format-int x
+    :real' x -> intrinsic.format-real x
+
+    :lambda -> "lambda"
+    :action -> "action"
+
+    :list xs -> xs
+      |> list.map (format-dynamic-pretty (l + 1) 0)
+      |> join (line l)
+      |> prepend (line l)
+      |> prepend "["
+      |> append (line (l - 1))
+      |> append "]"
+
+    :tuple xs -> xs
+      |> list.map (format-dynamic-pretty l 1)
+      |> join ", "
+      |> paren p 0
+
+    :record xs -> match xs
+      [] -> "{}"
+      _  -> xs
+        |> list.map \n, x. n
+          |> append ": "
+          |> append (format-dynamic-pretty (l + 1) 0 x)
+        |> join (line l)
+        |> prepend (line l)
+        |> prepend "{"
+        |> append (line (l - 1))
+        |> append "}"
+
+    :variant (name, x) -> match x
+      :none -> name |> prepend ":"
+      :some x -> name
+        |> prepend ":"
+        |> append " "
+        |> append (format-dynamic-pretty l 1 x)
         |> paren p 1
