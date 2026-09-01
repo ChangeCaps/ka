@@ -1,1 +1,3 @@
-rs = 0 + 
+import "test" as test
+
+ones = 1 :: ones

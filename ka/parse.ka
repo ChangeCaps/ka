@@ -94,7 +94,7 @@ expect-ty ts p =
     |> map \x, span.
       x |> some-or (:error span)
 
-is parser ty
+is parser (ty str)
 ty = delay \_. ty-lambda
 
 ty-rs = [ 
@@ -143,7 +143,7 @@ ty-tuple =
 ty-union =
   let variant = token :colon
     |> thenr ident
-    |> then (maybe ty)
+    |> then (maybe ty-apply)
     |> spanned
     |> flatten
     |> map \name, payload, span.
@@ -174,39 +174,20 @@ ty-union =
         variants: variants
         span:     span
       }
-    |> else ty-alias
+    |> else ty-apply
 
-ty-alias =
-  let name = ident
-    |> then (maybe (token :dot |> thenr ident))
-    |> map \x, y.
-      match y
-        :some y -> :some x, y
-        :none   -> :none  , x
-
-  let simple = name
+ty-apply =
+  ty-term
+    |> then (many0 ty-term)
     |> spanned
     |> flatten
-    |> map \from, name, span.
-      :alias {
-        from: from
-        name: name
-        args: []
-        span: span
-      }
-
-  name
-    |> then (many0 (else simple ty-term))
-    |> spanned
-    |> flatten4
-    |> map \from, name, args, span.
-      :alias {
-        from: from
-        name: name
-        args: args 
-        span: span
-      }
-    |> else ty-term
+    |> map \ty, args, span.
+      args |> list.fold ty \lambda input.
+        :apply {
+          lambda: ty
+          input:  input
+          span:   span
+        }
 
 ty-term = ty-paren
   |> else ty-nat
@@ -313,7 +294,7 @@ expect-pat ts p =
     |> map \x, span.
       x |> some-or (:error span)
 
-is parser pat
+is parser (pat str)
 pat = delay \_. pat-tuple
 
 pat-tuple =
@@ -456,7 +437,7 @@ expect-expr rs p =
     |> map \x, span.
       x |> some-or (:error span)
 
-is parser expr
+is parser (expr str)
 expr =
   delay \_.
     expr-block
@@ -618,13 +599,14 @@ expr-pipe =
     |> spanned
     |> flatten4
     |> map \input, line, block, span.
-      match list.flatten (line :: block)
-        []      -> input
-        lambdas -> :pipe {
-          input:   input
-          lambdas: lambdas
-          span:    span
-        }
+      line :: block
+        |> list.flatten
+        |> list.fold input \input lambda.
+          :pipe {
+            input:  input
+            lambda: lambda
+            span:   span
+          }
 
 expr-tuple =
   let field = token :comma
@@ -655,22 +637,7 @@ expr-cmp =
   binary [:gt, :gt; :lt, :lt; :gt-eq, :ge; :lt-eq, :le] expr-cons
 
 expr-cons =
-  let rhs = token :colon-colon
-    |> thenr (delay \_. expect-expr expr-rs expr-cons)
-
-  expr-add-sub
-    |> then (maybe rhs)
-    |> spanned
-    |> flatten
-    |> map \first, rest, span.
-      match rest
-        :none -> first
-        :some rest ->
-          :cons {
-            first: first
-            rest:  rest
-            span:  span
-          }
+  binary [:colon-colon, :cons] expr-add-sub
 
 expr-add-sub =
   binary [:plus, :add; :minus, :sub] expr-mul-div
@@ -723,21 +690,19 @@ expr-apply =
         span:    span
       }
     |> else expr-unary
-    |> many1
+    |> many0
 
   expr-unary
-    |> then (maybe args)
+    |> then args
     |> spanned
     |> flatten
     |> map \lambda, args, span.
-      match args
-        :none -> lambda
-        :some args ->
-          :apply {
-            lambda: lambda
-            args:   args
-            span:   span
-          }
+      args |> list.fold lambda \lambda input.
+        :apply {
+          lambda: lambda
+          input:  input
+          span:   span
+        }
 
 expr-with =
   let rhs = token :with'

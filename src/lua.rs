@@ -243,6 +243,12 @@ impl<'a> Codegen<'a> {
                 let local = self.add_local();
                 self.stmts.push(format!("local {local} = {input}"));
 
+                if expr.arms.len() == 1 {
+                    let arm = &expr.arms[0];
+                    self.pat(&arm.pat, local.clone());
+                    return self.expr(&arm.expr);
+                }
+
                 let output = self.add_local();
                 self.stmts.push(format!("local {output}"));
 

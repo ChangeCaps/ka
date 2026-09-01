@@ -13,54 +13,53 @@ type def =
   | :type'   type-def
   | :error   span
 
-type ty =
-  | :nat'    nat-ty
-  | :int'    int-ty
-  | :real'   real-ty
-  | :str'    str-ty
-  | :paren   paren-ty
-  | :list    list-ty
-  | :lambda  lambda-ty
-  | :generic generic-ty
-  | :record  record-ty
-  | :tuple   tuple-ty
-  | :union   union-ty
-  | :alias   alias-ty
-  | :action  action-ty
+type ty 'name =
+  | :nat'    nat-ty 'name
+  | :int'    int-ty 'name
+  | :real'   real-ty 'name
+  | :str'    str-ty 'name
+  | :paren   paren-ty 'name
+  | :list    list-ty 'name
+  | :lambda  lambda-ty 'name
+  | :generic generic-ty 'name
+  | :record  record-ty 'name
+  | :tuple   tuple-ty 'name
+  | :union   union-ty 'name
+  | :apply   apply-ty 'name
+  | :action  action-ty 'name
   | :error   span
 
-type pat =
-  | :paren   paren-pat
-  | :wild    wild-pat
-  | :bind    bind-pat
-  | :str'    str-pat
-  | :empty   empty-pat
-  | :cons    cons-pat
-  | :tuple   tuple-pat
-  | :variant variant-pat
+type pat 'name =
+  | :paren   paren-pat 'name
+  | :wild    wild-pat 'name
+  | :bind    bind-pat 'name
+  | :str'    str-pat 'name
+  | :empty   empty-pat 'name
+  | :cons    cons-pat 'name
+  | :tuple   tuple-pat 'name
+  | :variant variant-pat 'name
   | :error   span
 
-type expr =
-  | :paren    paren-expr
-  | :nat'     nat-expr
-  | :str'     str-expr
-  | :var      var-expr
-  | :field    field-expr
-  | :with'    with-expr
-  | :apply    apply-expr
-  | :pipe     pipe-expr
-  | :lambda   lambda-expr
-  | :list     list-expr
-  | :cons     cons-expr
-  | :variant  variant-expr
-  | :record   record-expr
-  | :tuple    tuple-expr
-  | :unary    unary-expr
-  | :binary   binary-expr
-  | :block    block-expr
-  | :do'      do-expr
-  | :do-block do-block-expr
-  | :match'   match-expr
+type expr 'name =
+  | :paren    paren-expr 'name
+  | :nat'     nat-expr   'name
+  | :str'     str-expr 'name
+  | :var      var-expr 'name
+  | :field    field-expr 'name
+  | :with'    with-expr 'name
+  | :apply    apply-expr 'name
+  | :pipe     pipe-expr 'name
+  | :lambda   lambda-expr 'name
+  | :list     list-expr 'name
+  | :variant  variant-expr 'name
+  | :record   record-expr 'name
+  | :tuple    tuple-expr 'name
+  | :unary    unary-expr 'name
+  | :binary   binary-expr 'name
+  | :block    block-expr 'name
+  | :do'      do-expr 'name
+  | :do-block do-block-expr 'name
+  | :match'   match-expr 'name
   | :error    span
 
 type import-def = {
@@ -73,277 +72,275 @@ type type-def = {
   is-local: bool
   name:     str
   params:   [str]
-  ty:       ty
+  ty:       ty str
   span:     span
 }
 
 type global-def = {
   is-local: bool
-  ty:       option ty
-  pat:      pat
-  params:   [pat]
-  output:   expr
+  ty:       option (ty str)
+  pat:      pat str
+  params:   [pat str]
+  output:   expr str
   span:     span
 }
 
-type nat-ty = {
+type nat-ty 'name = {
   span: span
 }
 
-type int-ty = {
+type int-ty 'name = {
   span: span
 }
 
-type real-ty = {
+type real-ty 'name = {
   span: span
 }
 
-type str-ty = {
+type str-ty 'name = {
   span: span
 }
 
-type paren-ty = {
-  ty:   ty
+type var-ty 'name = {
+  name: 'name
   span: span
 }
 
-type list-ty = {
-  item: ty
+type paren-ty 'name = {
+  ty:   ty 'name
   span: span
 }
 
-type lambda-ty = {
-  input:  ty
-  output: ty
+type list-ty 'name = {
+  item: ty 'name
+  span: span
+}
+
+type lambda-ty 'name = {
+  input:  ty 'name
+  output: ty 'name
   span:   span
 }
 
-type action-ty = {
-  output: ty
+type action-ty 'name = {
+  output: ty 'name
   span:   span
 }
 
-type generic-ty = {
+type generic-ty 'name = {
   name: str
   span: span
 }
 
-type tuple-ty = {
-  fields: [ty]
+type tuple-ty 'name = {
+  fields: [ty 'name]
   span:   span
 }
 
-type record-ty = {
-  fields: [ty-field]
+type record-ty 'name = {
+  fields: [ty-field 'name]
   span:   span
 }
 
-type union-ty = {
-  variants: [ty-variant]
+type union-ty 'name = {
+  variants: [ty-variant 'name]
   span:     span
 }
 
-type alias-ty = {
-  from: option str
-  name: str
-  args: [ty]
-  span: span
-}
-
-type ty-field = {
-  name: str
-  ty:   ty
-  span: span
-}
-
-type ty-variant = {
-  name:    str
-  payload: option ty
-  span:    span
-}
-
-type paren-pat = {
-  pat:  pat
-  span: span
-}
-
-type wild-pat = {
-  span: span
-}
-
-type bind-pat = {
-  name: str
-  span: span
-}
-
-type str-pat = {
-  value: str
-  span:  span
-}
-
-type empty-pat = {
-  span: span
-}
-
-type cons-pat = {
-  first: pat
-  rest:  pat
-  span:  span
-}
-
-type tuple-pat = {
-  fields: [pat]
+type apply-ty 'name = {
+  lambda: ty 'name
+  input:  ty 'name
   span:   span
 }
 
-type variant-pat = {
+type ty-field 'name = {
+  name: str
+  ty:   ty 'name
+  span: span
+}
+
+type ty-variant 'name = {
   name:    str
-  payload: option pat
+  payload: option (ty 'name)
   span:    span
 }
 
-type paren-expr = {
-  expr: expr
+type paren-pat 'name = {
+  pat:  pat 'name
   span: span
 }
 
-type nat-expr = {
+type wild-pat 'name = {
+  span: span
+}
+
+type bind-pat 'name = {
+  name: 'name
+  span: span
+}
+
+type str-pat 'name = {
   value: str
   span:  span
 }
 
-type str-expr = {
+type empty-pat 'name = {
+  span: span
+}
+
+type cons-pat 'name = {
+  first: pat 'name
+  rest:  pat 'name
+  span:  span
+}
+
+type tuple-pat 'name = {
+  fields: [pat 'name]
+  span:   span
+}
+
+type variant-pat 'name = {
+  name:    str
+  payload: option (pat 'name)
+  span:    span
+}
+
+type paren-expr 'name = {
+  expr: expr 'name
+  span: span
+}
+
+type nat-expr 'name = {
   value: str
   span:  span
 }
 
-type var-expr = {
-  name: str
+type str-expr 'name = {
+  value: str
+  span:  span
+}
+
+type var-expr 'name = {
+  name: 'name
   span: span
 }
 
-type field-expr = {
-  input: expr
+type field-expr 'name = {
+  input: expr 'name
   name:  str
   span:  span
 }
 
-type with-expr = {
-  input:  expr
-  fields: [expr-field]
+type with-expr 'name = {
+  input:  expr 'name
+  fields: [expr-field 'name]
   span:   span
 }
 
-type apply-expr = {
-  lambda: expr
-  args:   [expr]
+type apply-expr 'name = {
+  lambda: expr 'name
+  input:  expr 'name
   span:   span
 }
 
-type pipe-expr = {
-  input:   expr
-  lambdas: [expr]
-  span:    span
-}
-
-type lambda-expr = {
-  params: [pat]
-  output: expr
+type pipe-expr 'name = {
+  input:  expr 'name
+  lambda: expr 'name
   span:   span
 }
 
-type list-expr = {
-  items: [expr]
+type lambda-expr 'name = {
+  params: [pat 'name]
+  output: expr 'name
+  span:   span
+}
+
+type list-expr 'name = {
+  items: [expr 'name]
   span:  span
 }
 
-type cons-expr = {
-  first: expr
-  rest:  expr
-  span:  span
-}
-
-type variant-expr = {
+type variant-expr 'name = {
   name:    str
-  payload: option expr
+  payload: option (expr 'name)
   span:    span
 }
 
-type record-expr = {
-  fields: [expr-field]
+type record-expr 'name = {
+  fields: [expr-field 'name]
   span:   span
 }
 
-type tuple-expr = {
-  fields: [expr]
+type tuple-expr 'name = {
+  fields: [expr 'name]
   span:   span
 }
 
-type unary-expr = {
+type unary-expr 'name = {
   op:    unop
-  input: expr
+  input: expr 'name
   span:  span
 }
 
-type binary-expr = {
-  lhs:  expr
+type binary-expr 'name = {
+  lhs:  expr 'name
   op:   binop
-  rhs:  expr
+  rhs:  expr 'name
   span: span
 }
 
-type block-expr = {
-  stmts:  [let']
-  output: expr
+type block-expr 'name = {
+  stmts:  [let' 'name]
+  output: expr 'name
   span:   span
 }
 
-type do-expr = {
-  expr: expr
+type do-expr 'name = {
+  expr: expr 'name
   span: span
 }
 
-type do-block-expr = {
-  stmts: [do-block-stmt]
+type do-block-expr 'name = {
+  stmts: [do-block-stmt 'name]
   span:  span
 }
 
-type match-expr = {
-  input: expr
-  arms:  [match-arm]
+type match-expr 'name = {
+  input: expr 'name
+  arms:  [match-arm 'name]
   span:  span
 }
 
-type do-block-stmt =
-  | :let' let'
-  | :bind bind
-  | :expr expr
+type do-block-stmt 'name =
+  | :let' let' 'name
+  | :bind bind 'name
+  | :expr expr 'name
 
-type let' = {
-  ty:     option ty
-  pat:    pat
-  params: [pat]
-  input:  expr
+type let' 'name = {
+  ty:     option (ty 'name)
+  pat:    pat 'name
+  params: [pat 'name]
+  input:  expr 'name
   span:   span
 }
 
-type bind = {
-  ty:     option ty
-  pat:    pat
-  params: [pat]
-  input:  expr
+type bind 'name = {
+  ty:     option (ty 'name)
+  pat:    pat 'name
+  params: [pat 'name]
+  input:  expr 'name
   span:   span
 }
 
-type expr-field = {
+type expr-field 'name = {
   name: str
-  expr: expr
+  expr: expr 'name
   span: span
 }
 
-type match-arm = {
-  pat:  pat
-  expr: expr
+type match-arm 'name = {
+  pat:  pat 'name
+  expr: expr 'name
   span: span
 }
 
@@ -366,4 +363,5 @@ type binop =
   | :ne
   | :land
   | :lor
+  | :cons
 

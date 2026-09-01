@@ -1,6 +1,7 @@
 import "std:io" as io
 import "std:fs" as fs
 import "std:string"
+import "std:list"
 
 import "ka:parse/lex"
 import "ka:parse/parser"
@@ -19,16 +20,17 @@ main = do
     :err _ -> do {}
     :ok input -> do
       let ts, ds = lex file input
-      print-all ds
-
       let ast = parse ts module
 
       match ast
         :none -> do {}
-        :some (ast, ds) -> do
-          print-all ds
+        :some (ast, ds') -> do
+          let ds = append ds' ds
 
-          let renamed = rename ["test", ast]
+          let renamed, ds' = rename ["test", ast]
+          let ds = append ds' ds
+
+          print-all ds
 
           do {}
 

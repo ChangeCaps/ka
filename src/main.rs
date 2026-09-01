@@ -98,6 +98,7 @@ impl Compiler {
                 .unwrap();
 
             process::Command::new("luajit")
+                .arg("-O3")
                 .arg("out.lua")
                 .stdin(process::Stdio::inherit())
                 .stdout(process::Stdio::inherit())
