@@ -18,6 +18,7 @@ type ty 'name =
   | :int'    int-ty 'name
   | :real'   real-ty 'name
   | :str'    str-ty 'name
+  | :var     var-ty 'name
   | :paren   paren-ty 'name
   | :list    list-ty 'name
   | :lambda  lambda-ty 'name

@@ -194,6 +194,7 @@ ty-term = ty-paren
   |> else ty-int
   |> else ty-real
   |> else ty-str
+  |> else ty-var
   |> else ty-list
   |> else ty-generic
   |> else ty-action
@@ -225,6 +226,14 @@ ty-real = token :real'
 ty-str = token :str'
   |> spanned
   |> map \_, span. :str' { span: span }
+
+ty-var = ident
+  |> spanned
+  |> map \name, span.
+    :var {
+      name: name
+      span: span
+    }
 
 ty-list =
   token :open-bracket

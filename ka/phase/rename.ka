@@ -17,10 +17,14 @@ type name = {
   span:   span
 }
 
-type alias = {}
+type alias = {
+  name:   name
+  params: [name]
+  ty:     ty name
+  span:   span
+}
 
 type global = {
-  is-local: bool
   ty:       option (ty name)
   pat:      pat name
   params:   [pat name]
@@ -62,9 +66,11 @@ rename modules =
       let env, state, globals, types = defs
         |> list.fold (env, state, [], []) partial-def
 
+      let state = types
+        |> list.fold state (rename-type env)
+
       let state = globals
-        |> list.fold state \state partial.
-          rename-global env state partial
+        |> list.fold state (rename-global env)
 
       state
 
@@ -77,7 +83,7 @@ type env = {
 }
 
 type state = {
-  types:   map unique {}
+  types:   map unique alias
   globals: map unique global
   imports: map str unique
 
@@ -161,7 +167,25 @@ local partial-import env state def =
       env, state
 
 local partial-type env state def =
-  let type' = {}
+  let state, unique = add-unique state
+
+  let name = {
+    unique: unique
+    label:  def.name
+    kind:   :type'
+    span:   def.span
+  }
+
+  let env = env with {
+    types: map.insert def.name name env.types
+  }
+
+  let type' = {
+    unique: unique
+    name:   name
+    params: def.params
+    ty:     def.ty
+  }
 
   env, state, type'
 
@@ -182,12 +206,28 @@ local partial-global env state def =
 
   env, state, global
 
-
-local rename-global env state partial =
-  let state, expr = rename-expr env state partial.output
-    |> debug-pretty
+local rename-type env state partial =
+  let _env, state, ty = rename-ty env state partial.ty
 
   state
+
+local rename-global env state partial =
+  let _env, state, ty = rename-option-ty env state partial.ty
+
+  let env, state, params = rename-pats env state partial.params :local'
+  let state, output = rename-expr env state partial.output
+
+  let global = {
+    ty:     ty
+    pat:    partial.pat
+    params: params
+    output: output
+    span:   partial.span
+  }
+
+  state with {
+    globals: map.insert partial.unique global state.globals
+  }
 
 is env -> state -> [pat str] -> kind -> env, state, [pat name]
 local rename-pats env state pats kind =
@@ -277,68 +317,178 @@ local rename-pat env state pat kind =
     :error span -> env, state, :error span
 
 local rename-tys env state tys =
-  tys |> list.fold state
+  tys |> list.fold (env, state, []) \env, state, tys ty.
+    let env, state, ty = rename-ty env state ty
+    env, state, ty :: tys
 
-is env -> state -> ty str -> state, ty name
+local rename-option-ty env state ty =
+  match ty
+    :some ty ->
+      let env, state, ty = rename-ty env state ty
+      env, state, :some ty
+    :none -> env, state, :none
+
+is env -> state -> ty str -> env, state, ty name
 local rename-ty env state ty =
   match ty
     :var ty ->
       match map.get ty.name env.types
-        :some name -> state, :var {
-          name: name
-          span: ty.span
-        }
+        :some name ->
+          env, state, :var {
+            name: name
+            span: ty.span
+          }
 
-        :none -> state, :error ty.span
+        :none ->
+          let state = "type `"
+            |> string.append ty.name
+            |> string.append "` not defined"
+            |> error
+            |> label ty.span "found here"
+            |> add-diagnostic state
 
-    :str' ty -> state, :str' { span: span }
-    :nat' ty -> state, :nat' { span: span }
-    :int' ty -> state, :int' { span: span }
-    :real' ty -> state, :real' { span: span }
+          env, state, :error ty.span
+
+    :str' ty -> env, state, :str' { span: ty.span }
+    :nat' ty -> env, state, :nat' { span: ty.span }
+    :int' ty -> env, state, :int' { span: ty.span }
+    :real' ty -> env, state, :real' { span: ty.span }
 
     :paren ty ->
-      let state, inner = rename-ty env state ty.ty
+      let env, state, inner = rename-ty env state ty.ty
 
-      state, :paren {
+      env, state, :paren {
         ty:   inner
-        span: span
+        span: ty.span
       }
 
     :list ty ->
-      let state, item = rename-ty env state ty.item
+      let env, state, item = rename-ty env state ty.item
 
-      state, :list {
+      env, state, :list {
         item: item
-        span: span
+        span: ty.span
       }
 
     :lambda ty ->
-      let state, input = rename-ty env state ty.input
-      let state, output = rename-ty env state ty.output
+      let env, state, input = rename-ty env state ty.input
+      let env, state, output = rename-ty env state ty.output
 
-    :generic ty -> :error ty.span
+      env, state, :lambda {
+        input:  input
+        output: output
+        span:   ty.span
+      }
+
+    :generic ty -> env, state, :error ty.span
 
     :record ty ->
-      let fields
+      let env, state, fields = rename-ty-fields env state ty.fields
+
+      env, state, :record {
+        fields: fields
+        span:   ty.span
+      }
+
+    :tuple ty ->
+      let env, state, fields = rename-tys env state ty.fields
+
+      env, state, :tuple {
+        fields: fields
+        span:   ty.span
+      }
+
+    :union ty ->
+      let env, state, variants = ty.variants
+        |> list.fold (env, state, []) \env, state, variants variant.
+          let env, state, variant = rename-ty-variant env state variant
+          env, state, variant :: variants
+
+      env, state, :union {
+        variants: variants
+        span:     ty.span
+      }
+
+    :apply ty ->
+      let env, state, lambda = rename-ty env state ty.lambda
+      let env, state, input = rename-ty env state ty.input
+
+      env, state, :apply {
+        lambda: lambda
+        input:  input
+        span:   ty.span
+      }
+
+    :action ty ->
+      let env, state, output = rename-ty env state ty.output
+
+      env, state, :action {
+        output: output
+        span:   ty.span
+      }
+
+    :error span -> env, state, :error span
+
+local rename-ty-fields env state fields =
+  fields |> list.fold (env, state, []) \env, state, fields field.
+    let env, state, field = rename-ty-field env state field
+    env, state, field :: fields
+
+local rename-ty-field env state field =
+  let env, state, ty = rename-ty env state field.ty
+
+  env, state, {
+    name: field.name
+    ty:   ty
+    span: field.span
+  }
+
+local rename-ty-variant env state variant =
+  let env, state, payload = rename-option-ty env state variant.payload
+
+  env, state, {
+    name:    variant.name
+    payload: payload
+    span:    variant.span
+  }
 
 local rename-exprs env state exprs =
   exprs |> list.fold (state, []) \state, exprs expr.
     let state, expr = rename-expr env state expr
     state, expr :: exprs
 
+is env -> state -> expr str -> state, expr name
 local rename-expr env state expr =
   match expr
     :var expr ->
       match map.get expr.name env.variables
-        :some name -> state, :var {
-          name: name
-          span: expr.span
-        }
+        :some name ->
+          state, :var {
+            name: name
+            span: expr.span
+          }
 
-        :none -> state, :error expr.span
+        :none ->
+          let state = "variable `"
+            |> string.append expr.name
+            |> string.append "` not defined"
+            |> error
+            |> label expr.span "found here"
+            |> add-diagnostic state
 
-    :nat' expr -> state, :nat' expr
-    :str' expr -> state, :str' expr
+          state, :error expr.span
+
+    :nat' expr ->
+      state, :nat' {
+        value: expr.value
+        span:  expr.span
+      }
+
+    :str' expr ->
+      state, :str' {
+        value: expr.value
+        span:  expr.span
+      }
 
     :paren expr ->
       let state, inner = rename-expr env state expr.expr
@@ -353,13 +503,16 @@ local rename-expr env state expr =
 
       state, :field {
         input: input
+        name:  expr.name
         span:  expr.span
       }
 
     :with' expr ->
-      let state, fields = rename-expr-fields env state expr.fields 
+      let state, input = rename-expr env state expr.input
+      let state, fields = rename-expr-fields env state expr.fields
 
       state, :with' {
+        input:  input
         fields: fields
         span:   expr.span
       }
@@ -414,7 +567,7 @@ local rename-expr env state expr =
         payload: payload
         span:    expr.span
       }
-    
+
     :record expr ->
       let state, fields = rename-expr-fields env state expr.fields
 
@@ -523,7 +676,7 @@ local rename-expr-fields env state fields =
     let state, field = rename-expr-field env state field
     state, field :: fields
 
-local rename-expr-field env state field = 
+local rename-expr-field env state field =
   let state, expr = rename-expr env state field.expr
 
   let field = {
@@ -535,18 +688,14 @@ local rename-expr-field env state field =
   state, field
 
 local rename-let env state stmt =
-  let state, ty = match stmt.ty
-    :some ty ->
-      let state, ty = rename-ty env state ty
-      state, :some ty
-    :none -> state, :none
+  let _env, state, ty = rename-option-ty env state stmt.ty
 
   let env, state, params = rename-pats env state stmt.params :local'
   let state, input = rename-expr env state stmt.input
 
   let env, state, pat = rename-pat env state stmt.pat :local'
 
-  env, state, :let' {
+  env, state, {
     ty:     ty
     pat:    pat
     params: params
