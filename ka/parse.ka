@@ -177,8 +177,8 @@ ty-union =
     |> else ty-apply
 
 ty-apply =
-  ty-term
-    |> then (many0 ty-term)
+  ty-field
+    |> then (many0 ty-field)
     |> spanned
     |> flatten
     |> map \ty, args, span.
@@ -187,6 +187,24 @@ ty-apply =
           lambda: ty
           input:  input
           span:   span
+        }
+
+ty-field =
+  let fields = token :dot
+    |> thenr (recover "{identifier}" ty-rs ident)
+    |> many0
+    |> map filter-some
+
+  ty-term
+    |> then fields
+    |> spanned
+    |> flatten
+    |> map \ty, fields, span.
+      fields |> list.fold ty \ty name.
+        :field {
+          input: ty
+          name:  name
+          span:  span
         }
 
 ty-term = ty-paren
@@ -544,7 +562,7 @@ expr-match =
     |> map (filter-map \x. x)
 
   token :match'
-    |> thenr expr
+    |> thenr (expect-expr [:newline] expr)
     |> then arms
     |> spanned
     |> flatten
@@ -580,17 +598,15 @@ expr-block =
     |> then expr
     |> thenl expect-newlines
     |> thenl (expect :dedent)
-    |> spanned
-    |> flatten
-    |> map \stmts, output, span.
+    |> map \stmts, output.
       :block {
         stmts:  stmts
         output: output
-        span:   span
+        span:   expr-span output
       }
 
 expr-pipe =
-  let pipe = token :pipe-right
+  let pipe = token :pipe-gt
     |> thenr expr-apply
 
   let line = many1 pipe
@@ -634,32 +650,34 @@ expr-tuple =
         }
 
 expr-or =
-  binary [:or', :lor] expr-and
+  expr-binary [:or', :lor] expr-and
 
 expr-and =
-  binary [:and', :land] expr-eq
+  expr-binary [:and', :land] expr-eq
 
 expr-eq =
-  binary [:eq-eq, :eq; :bang-eq, :ne] expr-cmp
+  expr-binary [:eq-eq, :eq; :bang-eq, :ne] expr-cmp
 
 expr-cmp =
-  binary [:gt, :gt; :lt, :lt; :gt-eq, :ge; :lt-eq, :le] expr-cons
+  expr-binary [:gt, :gt; :lt, :lt; :gt-eq, :ge; :lt-eq, :le] expr-cons
 
 expr-cons =
-  binary [:colon-colon, :cons] expr-add-sub
+  expr-binary [:colon-colon, :cons] expr-add-sub
 
 expr-add-sub =
-  binary [:plus, :add; :minus, :sub] expr-mul-div
+  expr-binary [:plus, :add; :minus, :sub] expr-mul-div
 
 expr-mul-div =
-  binary [:star, :mul; :slash, :div] expr-variant
+  expr-binary [:star, :mul; :slash, :div] expr-variant
 
-local binary ops lhs =
+local expr-binary ops lhs =
   let rhs = ops
     |> fold never \other t, op.
       token t
-        |> thenr (delay \_. expect-expr expr-rs (binary ops lhs))
-        |> map \rhs. op, rhs
+        |> spanned
+        |> map \_, span. span
+        |> then (delay \_. expect-expr expr-rs (expr-binary ops lhs))
+        |> map \span, rhs. op, span, rhs
         |> else other
 
   lhs
@@ -667,12 +685,13 @@ local binary ops lhs =
     |> spanned
     |> flatten
     |> map \lhs, rhs, span.
-      rhs |> fold lhs \lhs op, rhs.
+      rhs |> fold lhs \lhs op, op-span, rhs.
         :binary {
-          op:   op
-          lhs:  lhs
-          rhs:  rhs
-          span: span
+          lhs:     lhs
+          op:      op
+          op-span: op-span
+          rhs:     rhs
+          span:    span
         }
 
 expr-variant = token :colon
@@ -701,7 +720,7 @@ expr-apply =
     |> else expr-unary
     |> many0
 
-  expr-unary
+  expr-with
     |> then args
     |> spanned
     |> flatten
@@ -738,13 +757,17 @@ expr-unary =
     |> expect-expr expr-rs
 
   let unary t op = token t
-    |> thenr recover
     |> spanned
-    |> map \input, span.
+    |> map \_, span. span
+    |> then recover
+    |> spanned
+    |> flatten
+    |> map \op-span, input, span.
       :unary {
-        op:    op
-        input: input
-        span:  span
+        op:      op
+        op-span: op-span
+        input:   input
+        span:    span
       }
 
   unary :nat' :nat'
@@ -755,7 +778,7 @@ expr-unary =
 
 expr-field =
   let fields = token :dot
-    |> thenr (recover "{identifier}" expr-rs ident)
+    |> thenr (recover "{identifier}" expr-rs (spanned ident))
     |> many0
     |> map filter-some
 
@@ -764,11 +787,12 @@ expr-field =
     |> spanned
     |> flatten
     |> map \input, fields, span.
-      fields |> fold input \input name.
+      fields |> fold input \input name, name-span.
         :field {
-          input: input
-          name:  name
-          span:  span
+          input:     input
+          name:      name
+          name-span: name-span
+          span:      span
         }
 
 expr-term = expr-var
@@ -837,7 +861,7 @@ expr-list =
       }
 
   let non-empty = token :open-bracket
-    |> thenr block
+    |> thenr (else args block)
     |> thenl (expect :close-bracket)
     |> spanned
     |> map \items, span.
@@ -874,17 +898,16 @@ expr-record =
 
 expr-fields =
   let field = ident
+    |> spanned
     |> thenl (expect :colon)
     |> then (expect-expr expr-rs expr)
-    |> spanned
     |> flatten
-    |> map \name, expr, span.
+    |> map \name, span, expr.
       {
         name: name
         expr: expr
         span: span
       }
-    |> thenl expect-newlines
 
   let fields = field
     |> then (many0 (token :semi |> thenr field))
@@ -893,7 +916,7 @@ expr-fields =
 
   let block = newlines1
     |> then (token :indent)
-    |> thenr (many1 field)
+    |> thenr (many1 (field |> thenl expect-newlines))
     |> thenl (expect :dedent)
     |> thenl expect-newlines
 

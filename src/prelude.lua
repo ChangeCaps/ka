@@ -12,15 +12,17 @@ local function cons(i, r)
   }
 end
 
+local empty = { ['$empty'] = true }
+
 local extern = {
   ["io::print"] = function(x)
     return function()
       io.write(x)
     end
   end,
-  ["fs::read"] = function(x)
+  ["fs::read"] = function(path)
     return function()
-      local file = io.open(x, "r")
+      local file = io.open(path, "r")
 
       if file == nil then
         return variant("err", variant("not-found"))
@@ -34,6 +36,42 @@ local extern = {
       end
 
       return variant("ok", contents)
+    end
+  end,
+  ["fs::write"] = function(path)
+    return function(x)
+      return function()
+        local file = io.open(path, "w")
+
+        if file == nil then
+          return variant("err", variant("not-found"))
+        end
+
+        local _, err = file:write(x)
+
+        if err ~= nil then
+          return variant("err", variant("not-found"))
+        end
+
+        file:close()
+
+        return variant("ok", {})
+      end
+    end
+  end,
+  ["os::execute"] = function(cmd)
+    return function()
+      local file = io.popen(cmd, "r")
+
+      if not file then
+        return variant("err", variant("not-found"))
+      end
+
+      local output = file:read("*a")
+
+      local _, _, code = file:close()
+
+      return variant("ok", { code, output })
     end
   end,
   ["string::ansi-escape"] = "\x1b",
@@ -61,19 +99,22 @@ local function copy(x)
   return output
 end
 
+local function panic(message)
+  print("explicit panic: " .. message)
+  os.exit(1)
+end
+
 local function dynamic(x)
-  if type(x) == "table" and x['$item'] ~= nil then
+  if type(x) == "table" and (x['$item'] ~= nil or x['$empty'] ~= nil) then
     local function list(y)
-      if y ~= nil then
+      if y['$empty'] == nil then
         return cons(dynamic(y['$item']), list(y['$rest']))
       else
-        return nil
+        return y
       end
     end
 
     return variant("list", list(x))
-  elseif type(x) == "nil" then
-    return variant("list", nil)
   elseif type(x) == "table" and x['$variant'] ~= nil then
     local payload
 
@@ -85,7 +126,7 @@ local function dynamic(x)
 
     return variant("variant", { x['$variant'], payload })
   elseif type(x) == "table" and x[1] ~= nil then
-    local fields = nil
+    local fields = empty
 
     for i = #x, 1, -1 do
       fields = cons(dynamic(x[i]), fields)
@@ -93,7 +134,7 @@ local function dynamic(x)
 
     return variant("tuple", fields)
   elseif type(x) == "table" then
-    local fields = nil
+    local fields = empty
 
     for k, v in pairs(x) do
       fields = cons({ k, dynamic(v) }, fields)
@@ -132,7 +173,7 @@ local function hashstr(x)
 end
 
 local function hashnum(x)
-  return x
+  return (x * 2654435761) % 4294967296
 end
 
 local function utf8_chars(x)
@@ -215,7 +256,7 @@ end
 local function eq(a, b)
   if type(a) == "table" then
     for k, v in pairs(a) do
-      if v ~= b[k] then
+      if b[k] == nil or not eq(v, b[k]) then
         return false
       end
     end

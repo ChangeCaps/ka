@@ -41,3 +41,9 @@ label span message diagnostic =
   diagnostic with {
     labels: label :: diagnostic.labels
   }
+
+is str -> diagnostic -> diagnostic
+note note diagnostic =
+  diagnostic with {
+    note: :some note
+  }

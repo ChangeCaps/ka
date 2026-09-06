@@ -19,6 +19,15 @@ insert key value map = insert-hashed (hash key) key value map
 is 'k -> map 'k 'v -> option 'v
 get key map = get-hashed (hash key) key map
 
+is 'k -> map 'k 'v -> bool
+has key map = get key map |> is-some
+
+is map 'k 'v -> nat
+count map =
+  match map
+    :some node -> 1 + count node.lhs + count node.rhs
+    :none -> 0
+
 is 'k -> map 'k 'v -> map 'k 'v
 remove key map = remove-hashed (hash key) key map
 

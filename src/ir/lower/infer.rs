@@ -349,12 +349,6 @@ impl Lowerer<'_> {
                 }
             }
 
-            (Ty::Alias(lhs), Ty::Alias(rhs)) if lhs.alias == rhs.alias => {
-                for (lhs, rhs) in lhs.args.iter().zip(&rhs.args) {
-                    self.try_unify(lhs, rhs)?;
-                }
-            }
-
             (Ty::Alias(lhs), rhs) => {
                 let lhs = self.instantiate_alias(lhs);
                 self.try_unify(&lhs, rhs)?;
@@ -365,7 +359,10 @@ impl Lowerer<'_> {
                 self.try_unify(lhs, &rhs)?;
             }
 
-            (_, _) => return Err(()),
+            (_, _) => {
+                dbg!(self.format_ty(lhs), self.format_ty(rhs));
+                return Err(());
+            }
         }
 
         Ok(())

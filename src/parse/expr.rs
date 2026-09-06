@@ -383,7 +383,9 @@ fn variant(parser: &mut Parser) -> Expr {
     let span = parser.consume();
     let name = parser.expect_ident();
 
-    let expr = is_expr(parser.peek()).then(|| call(parser)).map(Box::new);
+    let expr = is_expr(parser.peek())
+        .then(|| variant(parser))
+        .map(Box::new);
 
     Expr::Variant(VariantExpr { name, expr, span })
 }

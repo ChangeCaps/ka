@@ -64,12 +64,22 @@ type token =
   | :colon-colon
   | :right-arrow
   | :left-arrow
-  | :pipe-right
-  | :pipe-left
+  | :pipe-gt
+  | :bang-gt
+  | :lt-pipe
+  | :lt-bang
   | :eq-eq
   | :bang-eq
   | :gt-eq
   | :lt-eq
+
+is token -> str
+as-kind token = match token
+  :ident s   -> "{identifier}"
+  :number s  -> "{number}"
+  :invalid s -> "{invalid}"
+  :string s  -> "{string}"
+  token -> as-str token
 
 is token -> str
 as-str token = match token 
@@ -128,8 +138,10 @@ as-str token = match token
   :colon-colon -> "::"
   :right-arrow -> "->"
   :left-arrow  -> "<-"
-  :pipe-right  -> "|>"
-  :pipe-left   -> "<|"
+  :pipe-gt     -> "|>"
+  :bang-gt     -> "!>"
+  :lt-pipe     -> "<|"
+  :lt-bang     -> "<!"
   :eq-eq       -> "=="
   :bang-eq     -> "!="
   :gt-eq       -> ">="

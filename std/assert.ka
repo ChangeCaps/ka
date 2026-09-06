@@ -1,0 +1,10 @@
+import "intrinsic" as intrinsic
+
+is str -> 'a
+panic message = intrinsic.panic message
+
+is bool -> str -> 'a -> 'a
+assert condition message x =
+  match condition
+    :true  -> x
+    :false -> panic message

@@ -1,4 +1,5 @@
 import "std:option"
+import "std:result"
 
 is 'a -> ['a] -> ['a]
 push x xs = x :: xs
@@ -13,10 +14,43 @@ first xs = match xs
   x :: _ -> :some x
   [] -> :none 
 
+is ['a] -> option ['a]
+tail xs = match xs
+  _ :: xs -> :some xs
+  [] -> :none
+
+is ['a] -> option 'a
+last xs = match xs
+  x :: [] -> :some x
+  _ :: xs -> last xs
+  [] -> :none
+
+is ['a] -> bool
+is-empty xs = match xs
+  _ :: _ -> :false
+  [] -> :true
+
+is ['a] -> bool
+is-not-empty xs = !(is-empty xs)
+
+is nat -> 'a -> ['a]
+repeat n x =
+  match n > 0
+    :true -> x :: repeat (n - 1) x
+    :false -> []
+
 is ('a -> 'b) -> ['a] -> ['b]
 map f xs = match xs
   x :: xs -> f x :: map f xs
   [] -> []
+
+is [option 'a] -> option ['a]
+maybe xs = match xs
+  :some x :: xs -> match maybe xs
+    :some xs -> :some (x :: xs)
+    :none -> :none
+  [] -> :some []
+  _ -> :none
 
 is ('a -> bool) -> ['a] -> ['a]
 filter f xs = match xs
@@ -40,6 +74,11 @@ flatten xss = match xss
   xs :: xss -> append (flatten xss) xs
   [] -> []
 
+is ['b] -> ['a] -> ['a, 'b]
+zip ys xs = match xs, ys
+  x :: xs, y :: ys -> (x, y) :: zip ys xs
+  _, _ -> []
+
 is ['a] -> ['a]
 reverse xs = extend-reversed xs []
 
@@ -48,6 +87,9 @@ append ys xs = match xs
   x :: xs -> x :: append ys xs
   [] -> ys
 
+is ['a] -> ['a] -> ['a]
+prepend ys xs = append xs ys
+
 is ('a -> bool) -> ['a] -> option 'a
 find f xs = match xs
   x :: xs -> match f x
@@ -55,8 +97,20 @@ find f xs = match xs
     :false -> find f xs
   [] -> :none
 
+is ('a -> option 'b) -> ['a] -> option 'b
+find-map f xs = match xs
+  x :: xs -> match f x
+    :some x -> :some x
+    :none -> find-map f xs
+  [] -> :none
+
 is ('a -> bool) -> ['a] -> bool
 any f xs = find f xs |> is-some
+
+is ('a -> bool) -> ['a] -> bool
+all f xs = xs
+  |> find \x. !(f x)
+  |> is-none
 
 is 'a -> ['a] -> bool
 contains x xs = xs |> any \x'. x' == x
@@ -65,6 +119,25 @@ is 'acc -> ('acc -> 'a -> 'acc) -> ['a] -> 'acc
 fold acc f xs = match xs
   x :: xs -> fold (f acc x) f xs
   [] -> acc
+
+is 'acc -> ('acc -> 'a -> 'acc) -> ['a] -> 'acc
+rfold acc f xs = match xs
+  x :: xs -> f (rfold acc f xs) x
+  [] -> acc
+
+is 'acc -> ('acc -> 'a -> !'acc) -> ['a] -> !'acc
+mfold acc f xs = match xs
+  x :: xs -> do
+    let acc <- f acc x
+    mfold acc f xs
+  [] -> do acc
+
+is 'acc -> ('acc -> 'a -> option 'acc) -> ['a] -> option 'acc
+maybe-fold acc f xs = match xs
+  x :: xs -> match f acc x
+    :some acc -> maybe-fold acc f xs
+    :none -> :none
+  [] -> :some acc
 
 is ('a -> !'b) -> ['a] -> !['b]
 each f xs = match xs
@@ -87,8 +160,15 @@ count xs = xs |> fold 0 \c _. c + 1
 is nat -> ['a] -> ['a]
 skip n xs = match xs
   x :: xs' -> match n > 0
-    :false -> xs
     :true -> skip (n - 1) xs'
+    :false -> xs
+  [] -> []
+
+is nat -> ['a] -> ['a]
+take n xs = match xs
+  x :: xs -> match n > 0
+    :true -> x :: take (n - 1) xs
+    :false -> []
   [] -> []
 
 is nat -> ['a] -> option 'a

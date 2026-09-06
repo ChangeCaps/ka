@@ -1,0 +1,1574 @@
+import "std:string" as string
+import "std:map"    as map
+import "std:set"    as set
+import "std:list"   as list
+import "std:debug"  as debug
+import "std:option" as option
+
+import "ka:diagnostic/diagnostic" as diagnostic
+import "ka:diagnostic/span"       as span
+import "ka:phase/rename"          as rename
+import "ka:ast"                   as ast
+
+import "ka:phase/typecheck/exhaust" as exhaust
+
+type typechecked = {
+  globals: map unique global
+}
+
+type unique = rename.unique
+type kind   = rename.kind
+
+type name = {
+  unique: unique
+  label:  str
+  kind:   kind
+  span:   span
+  ty:     ty
+}
+
+type rty = ast.ty rename.name
+
+type ty =
+  | :var var
+  | :str'
+  | :nat'
+  | :int'
+  | :real'
+  | :list ty
+  | :action ty
+  | :lambda (ty, ty)
+  | :apply (ty, ty)
+  | :field (ty, str)
+  | :alias alias
+  | :tuple [ty]
+  | :record [field]
+  | :union [variant]
+
+type alias = {
+  params: [var]
+  body: ty
+}
+
+type field = {
+  name: str
+  ty:   ty
+}
+
+type variant = {
+  name:    str
+  payload: option ty
+}
+
+type var = {
+  name:  option str
+  index: nat
+}
+
+type bound =
+  | :numeric numeric
+  | :record [field]
+  | :union [variant]
+  | :subst ty
+  | :none
+
+type numeric =
+  | :nat'
+  | :int'
+  | :real'
+
+type global = {}
+
+typecheck renamed =
+  let state = {
+    this:   0
+    names:  map.empty
+    cache:  map.empty
+    bounds: map.empty
+    diagnostics: []
+
+    dependencies: renamed.dependencies
+  }
+
+  let state = renamed.aliases
+    |> list.fold state typecheck-alias
+
+  let state, checked = renamed.globals
+    |> map.values
+    |> list.fold (state, set.empty) (typecheck-global renamed.globals)
+
+  {}, state.diagnostics
+
+local type state = {
+  this:   unique
+  names:  map unique name
+  cache:  map (ty, ty) {}
+  bounds: map nat bound
+  diagnostics: [diagnostic]
+
+  dependencies: map unique (set unique)
+}
+
+local type provenance =
+  | :application {
+    lambda: span
+    span:   span
+  }
+
+  | :ascription {
+    ascription: span
+    span: span
+  }
+
+  | :field {
+    name:  str
+    field: span
+    span:  span
+  }
+
+  | :operator {
+    operator: span
+    span: span
+  }
+
+  | :list {
+    list: span
+    span: span
+  }
+
+  | :pat {
+    pat:  span
+    span: span
+  }
+
+  | :do-block {
+    block: span
+    span:  span
+  }
+
+  | :match' {
+    match': span
+    span:   span
+  }
+
+local type rexpr = expr rename.name
+local type texpr = expr name
+
+local type rpat = pat rename.name
+local type tpat = pat name
+
+local bool = :union [
+  {
+    name: "true"
+    payload: :none
+  }
+  {
+    name: "false"
+    payload: :none
+  }
+]
+
+local unit = :record []
+
+local typecheck-alias state alias =
+  let state, params = alias.params
+    |> list.rfold (state, []) \state, params param.
+      let state, param = name state param
+
+      match param.ty
+        :var var -> state, var :: params
+        _ -> state, params
+
+  let state, name = name state alias.name
+  let state, body = typecheck-ty state alias.ty
+
+  let ty = :alias {
+    params: params
+    body:   body
+  }
+
+  let prov = :ascription {
+    ascription: alias.span
+    span: ty-span alias.ty
+  }
+
+  let state = unify state ty name.ty prov
+
+  state
+
+local typecheck-global globals state, checked global =
+  match set.has global.unique checked
+    :true -> state, checked
+    :false ->
+      let checked = set.insert global.unique checked
+
+      let state, checked = map.get global.unique state.dependencies
+        |> some-or set.empty
+        |> set.list
+        |> list.filter-map \global. map.get global globals
+        |> list.fold (state, checked) (typecheck-global globals)
+
+      let state, pat-ty, pat = typecheck-pat state global.pat :false
+      let state, param-tys, params = typecheck-pats state global.params :false
+
+      let state = state with { this: global.unique }
+      let state, output-ty, output = typecheck-expr state global.output
+
+      let ty = param-tys
+        |> list.rfold output-ty \ty input.
+          :lambda (input, ty)
+
+      let prov = :pat {
+        pat:  pat-span pat
+        span: expr-span output
+      }
+
+      let state = unify state pat-ty ty prov
+
+      let state = match global.ty
+        :some ascribed ->
+          let prov = :ascription {
+            ascription: ty-span ascribed
+            span: expr-span global.output
+          }
+
+          let state, ascribed = typecheck-ty state ascribed
+          unify state ascribed ty prov
+        :none -> state
+
+      state, checked
+
+is state -> [unique] -> unique -> bool
+local is-recursive state seen global =
+  match list.contains global seen
+    :true -> :false
+    :false -> match global == state.this
+      :true -> :true
+      :false -> map.get global state.dependencies
+        |> some-or set.empty
+        |> set.list
+        |> list.any (is-recursive state (global :: seen))
+
+is state -> [rty] -> state, [ty]
+local typecheck-tys state tys =
+  tys |> list.fold (state, []) \state, tys ty.
+    let state, ty = typecheck-ty state ty
+    state, list.append [ty] tys
+
+is state -> rty -> state, ty
+local typecheck-ty state ty =
+  match ty
+    :str' ty -> state, :str'
+    :nat' ty -> state, :nat'
+    :int' ty -> state, :int'
+    :real' ty -> state, :real'
+
+    :var ty ->
+      match map.get ty.name.unique state.names
+        :some name -> state, name.ty
+        :none ->
+          let state, ty = add-inferred state
+          state, ty
+
+    :paren ty -> typecheck-ty state ty.ty
+
+    :list ty ->
+      let state, item = typecheck-ty state ty.item
+      state, :list item
+
+    :lambda ty ->
+      let state, input = typecheck-ty state ty.input
+      let state, output = typecheck-ty state ty.output
+
+      state, :lambda (input, output)
+
+    :generic ty ->
+      let state, name = name state ty.name
+      state, name.ty
+
+    :tuple ty ->
+      let state, fields = typecheck-tys state ty.fields
+      state, :tuple fields
+
+    :record ty ->
+      let state, fields = ty.fields
+        |> list.fold (state, []) \state, fields field.
+          match fields |> list.any \f. f.name == field.name
+            :true ->
+              let state = "duplicate field `"
+                |> string.append field.name
+                |> string.append "`"
+                |> error
+                |> label field.span "found in record here"
+                |> report state
+
+              state, fields
+
+            :false ->
+              let state, ty = typecheck-ty state field.ty
+
+              let field = {
+                name: field.name
+                ty:   ty
+              }
+
+              state, field :: fields
+
+      state, :record fields
+
+    :union ty ->
+      let state, variants = ty.variants
+        |> list.fold (state, []) \state, variants variant.
+          match variants |> list.any \v. v.name == variant.name
+            :true ->
+              let state = "duplicate variant `"
+                |> string.append variant.name
+                |> string.append "`"
+                |> error
+                |> label variant.span "found in variant here"
+                |> report state
+
+              state, variants
+
+            :false ->
+              let state, payload = match variant.payload
+                :some payload ->
+                  let state, payload = typecheck-ty state payload
+                  state, :some payload
+                :none -> state, :none
+
+              let variant = {
+                name:    variant.name
+                payload: payload
+              }
+
+              state, variant :: variants
+
+      state, :union variants
+
+    :apply ty ->
+      let state, lambda = typecheck-ty state ty.lambda
+      let state, input = typecheck-ty state ty.input
+
+      state, :apply (lambda, input)
+
+    :field ty ->
+      let state, input = typecheck-ty state ty.input
+      state, :field (input, ty.name)
+
+    :action ty ->
+      let state, output = typecheck-ty state ty.output
+      state, :action output
+
+    :error span -> add-inferred state
+
+is state -> [rpat] -> bool -> state, [ty], [tpat]
+local typecheck-pats state pats open =
+  pats |> list.fold (state, [], []) \state, tys, pats pat.
+    let state, ty, pat = typecheck-pat state pat open
+    state, list.append [ty] tys, list.append [pat] pats
+
+is state -> rpat -> bool -> state, ty, tpat
+local typecheck-pat state pat open =
+  match pat
+    :paren pat ->
+      let state, ty, inner = typecheck-pat state pat.pat open
+
+      state, ty, :paren {
+        pat:  inner
+        span: pat.span
+      }
+
+    :wild pat ->
+      let state, ty = add-inferred state
+
+      state, ty, :wild {
+        span: pat.span
+      }
+
+    :bind pat ->
+      let state, name = name state pat.name
+
+      state, name.ty, :bind {
+        name: name
+        span: pat.span
+      }
+
+    :str' pat ->
+      state, :str', :str' {
+        value: pat.value
+        span:  pat.span
+      }
+
+    :empty pat ->
+      let state, item = add-inferred state
+
+      state, :list item, :empty {
+        span: pat.span
+      }
+
+    :cons pat ->
+      let state, item, first = typecheck-pat state pat.first open
+      let state, ty, rest = typecheck-pat state pat.rest open
+
+      let prov = :pat {
+        pat:  pat.span
+        span: pat.span
+      }
+
+      let state = unify state (:list item) ty prov
+
+      state, ty, :cons {
+        first: first
+        rest:  rest
+        span:  pat.span
+      }
+
+    :tuple pat ->
+      let state, tys, fields = typecheck-pats state pat.fields open
+
+      state, :tuple tys, :tuple {
+        fields: fields
+        span:   pat.span
+      }
+
+    :variant pat ->
+      let state, ty, payload = match pat.payload
+        :some payload ->
+          let state, ty, pat = typecheck-pat state payload open
+          state, :some ty, :some pat
+        :none -> state, :none, :none
+
+      let variant = {
+        name:    pat.name
+        payload: ty
+      }
+
+      let state, var = add-var state :none (:union [variant])
+
+      state, :var var, :variant {
+        name:    pat.name
+        payload: payload
+        span:    pat.span
+      }
+
+    :error span ->
+      let state, ty = add-inferred state
+      state, ty, :error span
+
+is state -> [rexpr] -> state, [ty], [texpr]
+local typecheck-exprs state exprs =
+  exprs |> list.fold (state, [], []) \state, tys, exprs expr.
+    let state, ty, expr = typecheck-expr state expr
+    state, list.append [ty] tys, list.append [expr] exprs
+
+is state -> rexpr -> state, ty, texpr
+local typecheck-expr state expr =
+  match expr
+    :paren expr ->
+      let state, ty, inner = typecheck-expr state expr.expr
+
+      state, ty, :paren {
+        expr: inner
+        span: expr.span
+      }
+
+    :nat' expr ->
+      let state, var = add-var state :none (:numeric :real')
+
+      state, :var var, :nat' {
+        value: expr.value
+        span:  expr.span
+      }
+
+    :str' expr ->
+      state, :str', :str' {
+        value: expr.value
+        span:  expr.span
+      }
+
+    :var expr ->
+      let state, name = name state expr.name
+
+      match name.kind
+        :global global ->
+          let state, ty = match is-recursive state [] global
+            :true -> state, name.ty
+            :false -> instantiate state name.ty
+
+          state, ty, :var {
+            name: name
+            span: expr.span
+          }
+
+        :import' ->
+          let state, ty = "module without field"
+            |> error
+            |> label expr.span "module must be indexed by a field"
+            |> report state
+            |> add-inferred
+
+          state, ty, :error expr.span
+
+        _ ->
+          state, name.ty, :var {
+            name: name
+            span: expr.span
+          }
+
+    :field expr ->
+      let state, input-ty, input = typecheck-expr state expr.input
+      let state, ty = add-inferred state
+
+      let prov = :field {
+        name:  expr.name
+        field: expr.name-span
+        span:  expr.span
+      }
+
+      let field = {
+        name: expr.name
+        ty:   ty
+      }
+
+      let state = unify-field state input-ty field prov :right
+
+      state, ty, :field {
+        input:     input
+        name:      expr.name
+        name-span: expr.name-span
+        span:      expr.span
+      }
+
+    :with' expr ->
+      let state, ty, input = typecheck-expr state expr.input
+      let state, fields = expr.fields
+        |> list.fold (state, []) \state, fields field.
+          let prov = :field {
+            name:  field.name
+            field: field.span
+            span:  expr-span field.expr
+          }
+
+          let state, ty-field, field = typecheck-expr-field state field
+          let state = unify-field state ty ty-field prov :right
+
+          state, list.append [field] fields
+
+      state, ty, :with' {
+        input:  input
+        fields: fields
+        span:   expr.span
+      }
+
+    :apply expr ->
+      let state, lambda-ty, lambda = typecheck-expr state expr.lambda
+      let state, input-ty, input = typecheck-expr state expr.input
+
+      let prov = :application {
+        lambda: expr-span expr.lambda
+        span:   expr.span
+      }
+
+      let state, ty = add-inferred state
+      let state = unify state lambda-ty (:lambda (input-ty, ty)) prov
+
+      state, ty, :apply {
+        lambda: lambda
+        input:  input
+        span:   expr.span
+      }
+
+    :pipe expr ->
+      let state, input-ty, input = typecheck-expr state expr.input
+      let state, lambda-ty, lambda = typecheck-expr state expr.lambda
+
+      let prov = :application {
+        lambda: expr-span expr.lambda
+        span:   expr.span
+      }
+
+      let state, ty = add-inferred state
+      let state = unify state lambda-ty (:lambda (input-ty, ty)) prov
+
+      state, ty, :pipe {
+        input:  input
+        lambda: lambda
+        span:   expr.span
+      }
+
+    :lambda expr ->
+      let state, tys, params = typecheck-pats state expr.params :false
+      let state, ty, output = typecheck-expr state expr.output
+
+      let ty = tys
+        |> rfold ty \ty input.
+          :lambda (input, ty)
+
+      state, ty, :lambda {
+        params: params
+        output: output
+        span:   expr.span
+      }
+
+    :list expr ->
+      let state, item-ty = add-inferred state
+
+      let state, items = expr.items
+        |> list.fold (state, []) \state, items item.
+          let prov = :list {
+            list: expr.span
+            span: expr-span item
+          }
+
+          let state, ty, item = typecheck-expr state item
+          let state = unify state item-ty ty prov
+          state, list.append [item] items
+
+      state, :list item-ty, :list {
+        items: items
+        span:  expr.span
+      }
+
+    :variant expr ->
+      let state, ty, payload = match expr.payload
+        :some payload ->
+          let state, ty, payload = typecheck-expr state payload
+          state, :some ty, :some payload
+        :none -> state, :none, :none
+
+      let variant = {
+        name:    expr.name
+        payload: ty
+      }
+
+      let state, var = add-var state :none (:union [variant])
+
+      state, :var var, :variant {
+        name:    expr.name
+        payload: payload
+        span:    expr.span
+      }
+
+    :record expr ->
+      let state, tys, fields = typecheck-expr-fields state expr.fields
+
+      state, :record tys, :record {
+        fields: fields
+        span:   expr.span
+      }
+
+    :tuple expr ->
+      let state, tys, fields = typecheck-exprs state expr.fields
+
+      state, :tuple tys, :tuple {
+        fields: fields
+        span:   expr.span
+      }
+
+    :unary expr ->
+      let state, ty, input = typecheck-expr state expr.input
+
+      let prov = :operator {
+        operator: expr.op-span
+        span: expr.span
+      }
+
+      let state, ty = match expr.op
+        :nat' ->
+          let state = unify-numeric state ty :real' prov :right
+          state, :nat'
+
+        :int' ->
+          let state = unify-numeric state ty :real' prov :right
+          state, :int'
+
+        :real' ->
+          let state = unify-numeric state ty :real' prov :right
+          state, :real'
+
+        :not ->
+          let state = unify state bool ty prov
+          state, bool
+
+      state, ty, :unary {
+        op:      expr.op
+        op-span: expr.op-span
+        input:   input
+        span:    expr.span
+      }
+
+    :binary expr ->
+      let state, lhs-ty, lhs = typecheck-expr state expr.lhs
+      let state, rhs-ty, rhs = typecheck-expr state expr.rhs
+
+      let lhs-prov = :operator {
+        operator: expr.op-span
+        span: expr-span expr.lhs
+      }
+
+      let rhs-prov = :operator {
+        operator: expr.op-span
+        span: expr-span expr.rhs
+      }
+
+      let state, ty = match expr.op
+        :add ->
+          let state = unify-numeric state lhs-ty :real' lhs-prov :right
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, lhs-ty
+
+        :sub ->
+          let state = unify-numeric state lhs-ty :real' lhs-prov :right
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, lhs-ty
+
+        :mul ->
+          let state = unify-numeric state lhs-ty :real' lhs-prov :right
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, lhs-ty
+
+        :div ->
+          let state = unify state :real' lhs-ty lhs-prov
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, :real'
+
+        :gt ->
+          let state = unify-numeric state lhs-ty :real' lhs-prov :right
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, bool
+
+        :lt ->
+          let state = unify-numeric state lhs-ty :real' lhs-prov :right
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, bool
+
+        :ge ->
+          let state = unify-numeric state lhs-ty :real' lhs-prov :right
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, bool
+
+        :le ->
+          let state = unify-numeric state lhs-ty :real' lhs-prov :right
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, bool
+
+        :eq ->
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, bool
+
+        :ne ->
+          let state = unify state lhs-ty rhs-ty rhs-prov
+          state, bool
+
+        :land ->
+          let state = unify state bool lhs-ty lhs-prov
+          let state = unify state bool rhs-ty rhs-prov
+          state, bool
+
+        :lor ->
+          let state = unify state bool lhs-ty lhs-prov
+          let state = unify state bool rhs-ty rhs-prov
+          state, bool
+
+        :cons ->
+          let state = unify state (:list lhs-ty) rhs-ty rhs-prov
+          state, rhs-ty
+
+      state, ty, :binary {
+        lhs:     lhs
+        op:      expr.op
+        op-span: expr.op-span
+        rhs:     rhs
+        span:    expr.span
+      }
+
+    :block expr ->
+      let state, stmts = expr.stmts
+        |> list.fold (state, []) \state, stmts stmt.
+          let state, stmt = typecheck-let state stmt
+          state, list.append [stmt] stmts
+
+      let state, ty, output = typecheck-expr state expr.output
+
+      state, ty, :block {
+        stmts:  stmts
+        output: output
+        span:   expr.span
+      }
+
+    :do' expr ->
+      let state, ty, inner = typecheck-expr state expr.expr
+
+      state, :action ty, :do' {
+        expr: inner
+        span: expr.span
+      }
+
+    :do-block expr ->
+      let state, ty, stmts = expr.stmts
+        |> list.fold (state, :action unit, []) \state, _ty, stmts stmt.
+          match stmt
+            :let' stmt ->
+              let state, stmt = typecheck-let state stmt
+              state, :action unit, list.append [:let' stmt] stmts
+
+            :bind stmt ->
+              let state, stmt = typecheck-bind state stmt
+              state, :action unit, list.append [:bind stmt] stmts
+
+            :expr stmt ->
+              let prov = :do-block {
+                block: expr.span
+                span:  expr-span stmt
+              }
+
+              let state, ty, expr = typecheck-expr state stmt
+
+              let state, output = add-inferred state
+              let state = unify state (:action output) ty prov
+
+              state, ty, list.append [:expr expr] stmts
+
+      state, ty, :do-block {
+        stmts: stmts
+        span:  expr.span
+      }
+
+    :match' expr ->
+      let state, input-ty, input = typecheck-expr state expr.input
+      let state, output-ty = add-inferred state
+
+      let state, matrix, arms = expr.arms
+        |> list.fold (state, exhaust.matrix, []) \state, matrix, arms arm.
+          let prov = :match' {
+            match': expr-span expr.input
+            span:   expr-span arm.expr
+          }
+
+          let state, ty, pat = typecheck-pat state arm.pat :true
+          let state, expr =
+            let state, ty, expr = typecheck-expr state arm.expr
+            let state = unify state output-ty ty prov
+            state, expr
+
+          let arm = {
+            pat:  pat
+            expr: expr
+            span: arm.span
+          }
+
+          match exhaust.add-pat matrix pat
+            :some matrix ->
+              let state = unify state ty input-ty prov
+              state, matrix, list.append [arm] arms
+
+            :none ->
+              let state = error "incompatible pattern"
+                |> label (pat-span arm.pat) "found here"
+                |> report state
+
+              state, matrix, arms
+
+      let open = exhaust.open matrix
+      let col = first open.cols |> assert-some ""
+      let state, expected-ty = matrix-ty state col
+
+      let prov = :match' {
+        match': expr.span
+        span:   expr-span expr.input
+      }
+
+      let state = unify state expected-ty input-ty prov
+
+      let state, _ = arms
+        |> list.fold (state, exhaust.reset open) \state, matrix arm.
+          let row = exhaust.row arm.pat
+
+          match exhaust.is-useful matrix row
+            :true -> state, exhaust.add-row matrix row
+
+            :false ->
+              let state = warning "unreachable pattern"
+                |> label (pat-span arm.pat) "found here"
+                |> report state
+
+              state, matrix
+
+      let missing = exhaust.missing matrix
+      let state = match is-empty missing
+        :true -> state
+        :false ->
+          let msg = "missing patterns:\n\n"
+            |> string.append (join "\n" missing)
+
+          error "match is not exhaustive"
+            |> label expr.span "here"
+            |> note msg
+            |> report state
+
+      state, output-ty, :match' {
+        input: input
+        arms:  arms
+        span:  expr.span
+      }
+
+    :error span ->
+      let state, ty = add-inferred state
+      state, ty, :error span
+
+typecheck-let state stmt =
+  let state, pat-ty, pat = typecheck-pat state stmt.pat :false
+  let state, tys, params = typecheck-pats state stmt.params :false
+
+  let state, ty, input = typecheck-expr state stmt.input
+
+  let ty = tys
+    |> rfold ty \ty input.
+      :lambda (input, ty)
+
+  let prov = :pat {
+    pat:  pat-span stmt.pat
+    span: expr-span stmt.input
+  }
+
+  let state = unify state pat-ty ty prov
+
+  state, {
+    ty:     :none
+    pat:    pat
+    params: params
+    input:  input
+    span:   stmt.span
+  }
+
+typecheck-bind state stmt =
+  let state, pat-ty, pat = typecheck-pat state stmt.pat :false
+  let state, tys, params = typecheck-pats state stmt.params :false
+
+  let state, ty, input = typecheck-expr state stmt.input
+
+  let ty = tys
+    |> rfold ty \ty input.
+      :lambda (input, ty)
+
+  let prov = :pat {
+    pat:  pat-span stmt.pat
+    span: expr-span stmt.input
+  }
+
+  let state = unify state (:action pat-ty) ty prov
+
+  state, {
+    ty:     :none
+    pat:    pat
+    params: params
+    input:  input
+    span:   stmt.span
+  }
+
+typecheck-expr-fields state fields =
+  fields |> list.fold (state, [], []) \state, tys, exprs field.
+    let state, ty, expr = typecheck-expr-field state field
+    state, list.append [ty] tys, list.append [expr] exprs
+
+typecheck-expr-field state field =
+  let state, ty, expr = typecheck-expr state field.expr
+
+  let ty = {
+    name: field.name
+    ty:   ty
+  }
+
+  let expr = {
+    name: field.name
+    expr: expr
+    span: field.span
+  }
+
+  state, ty, expr
+
+is state -> exhaust.col -> state, ty
+local matrix-ty state col =
+  match col
+    :wild -> add-inferred state
+    :str' -> state, :str'
+
+    :list (item, list) ->
+      let state, item = matrix-ty state item
+      let state, list = matrix-ty state list
+
+      let span = {
+        file:  { path: "" }
+        start: 0
+        len:   0
+      }
+
+      let prov = :match' {
+        match': span
+        span:   span
+      }
+
+      let state = unify state (:list item) list prov
+      state, list
+
+    :tuple fields ->
+      let state, fields = fields
+        |> fold (state, []) \state, fields field.
+          let state, field = matrix-ty state field
+          state, list.append [field] fields
+
+      state, :tuple fields
+
+    :union union ->
+      let state, variants = union.variants
+        |> list.fold (state, []) \state, variants name, payload.
+          let state, payload = match payload
+            :some payload ->
+              let state, payload = matrix-ty state payload
+              state, :some payload
+            :none -> state, :none
+
+          let variant = {
+            name:    name
+            payload: payload
+          }
+
+          state, variant :: variants
+
+      match union.is-open
+        :true ->
+          let state, var = add-var state :none (:union variants)
+          state, :var var
+        :false -> state, :union variants
+
+is state -> rename.name -> state, name
+name state name =
+  match map.get name.unique state.names
+    :some name -> state, name
+    :none ->
+      let state, var = add-var state (:some name.label) :none
+
+      let name = {
+        unique: name.unique
+        label:  name.label
+        kind:   name.kind
+        span:   name.span
+        ty:     :var var
+      }
+
+      let state = state with {
+        names: map.insert name.unique name state.names
+      }
+
+      state, name
+
+is state -> ty -> state, ty
+local instantiate state ty =
+  let state, _, ty = instantiate-with state map.empty ty
+  state, ty
+
+is state -> map nat ty -> ty -> state, map nat ty, ty
+local instantiate-with state vars ty =
+  match ty
+    :var var ->
+      match map.get var.index vars
+        :some ty -> state, vars, ty
+        :none ->
+          let state, new = add-var state var.name :none
+          let vars = map.insert var.index (:var new) vars
+
+          let state, vars, bound = match bound state var
+            :numeric numeric -> state, vars, :numeric numeric
+
+            :record fields ->
+              let state, vars, fields = instantiate-record-with state vars fields
+              state, vars, :record fields
+
+            :union variants ->
+              let state, vars, variants = instantiate-union-with state vars variants
+              state, vars, :union variants
+
+            :subst subst ->
+              let state, vars, subst = instantiate-with state vars subst
+              state, vars, :subst subst
+
+            :none -> state, vars, :none
+
+          let state = set-bound state new bound
+          state, vars, :var new
+
+    :str' -> state, vars, :str'
+    :nat' -> state, vars, :nat'
+    :int' -> state, vars, :int'
+    :real' -> state, vars, :real'
+
+    :list ty ->
+      let state, vars, ty = instantiate-with state vars ty
+      state, vars, :list ty
+
+    :action ty ->
+      let state, vars, ty = instantiate-with state vars ty
+      state, vars, :action ty
+
+    :lambda (input, output) ->
+      let state, vars, input = instantiate-with state vars input
+      let state, vars, output = instantiate-with state vars output
+      state, vars, :lambda (input, output)
+
+    :apply (lambda, input) ->
+      let state, vars, input = instantiate-with state vars input
+      state, vars, :apply (lambda, input)
+
+    :field (input, name) ->
+      let state, vars, input = instantiate-with state vars input
+      state, vars, :field (input, name)
+
+    :alias alias ->
+      let vars = alias.params
+        |> list.fold vars \vars var.
+          map.insert var.index (:var var) vars
+
+      let state, vars, body = instantiate-with state vars alias.body
+
+      state, vars, :alias {
+        params: alias.params
+        body:   body
+      }
+
+    :tuple fields ->
+      let state, vars, fields = fields
+        |> list.rfold (state, vars, []) \state, vars, fields field.
+          let state, vars, field = instantiate-with state vars field
+          state, vars, field :: fields
+
+      state, vars, :tuple fields
+
+    :record fields ->
+      let state, vars, fields = instantiate-record-with state vars fields
+      state, vars, :record fields
+
+    :union variants ->
+      let state, vars, variants = instantiate-union-with state vars variants
+      state, vars, :union variants
+
+local instantiate-record-with state vars fields =
+  fields |> list.rfold (state, vars, []) \state, vars, fields field.
+    let state, vars, ty = instantiate-with state vars field.ty
+
+    let field = {
+      name: field.name
+      ty:   ty
+    }
+
+    state, vars, field :: fields
+
+local instantiate-union-with state vars variants =
+  variants |> list.rfold (state, vars, []) \state, vars, variants variant.
+    let state, vars, payload = match variant.payload
+      :some payload ->
+        let state, vars, payload = instantiate-with state vars payload
+        state, vars, :some payload
+      :none -> state, vars, :none
+
+    let variant = {
+      name:    variant.name
+      payload: payload
+    }
+
+    state, vars, variant :: variants
+
+is state -> ty -> ty -> provenance -> state
+local unify state lhs rhs prov =
+  match lhs == rhs or set.has (lhs, rhs) state.cache
+    :true -> state
+    :false ->
+      let state = state with {
+        cache: set.insert (lhs, rhs) state.cache
+      }
+
+      unify-ty-ty state lhs rhs prov
+
+local unify-ty-ty state lhs rhs prov =
+  let state, lhs = normalize state lhs
+  let state, rhs = normalize state rhs
+
+  match lhs, rhs
+    lhs, :var var -> unify-ty-var state lhs var prov :left
+    :var var, rhs -> unify-ty-var state rhs var prov :right
+
+    :str', :str' -> state
+    :nat', :nat' -> state
+    :int', :int' -> state
+    :real', :real' -> state
+
+    :list lhs, :list rhs ->
+      unify state lhs rhs prov
+
+    :action lhs, :action rhs ->
+      unify state lhs rhs prov
+
+    :lambda (l-in, l-out), :lambda (r-in, r-out) ->
+      let state = unify state l-in r-in prov
+      unify state l-out r-out prov
+
+    :tuple lhs, :tuple rhs ->
+      match list.count lhs == list.count rhs
+        :true ->
+          zip rhs lhs
+            |> fold state \state lhs, rhs.
+              unify state lhs rhs prov
+
+        :false ->
+          let span = primary-span prov
+
+          let msg = "expected tuple with "
+            |> string.append (list.count lhs |> string.format)
+            |> string.append " fields, found "
+            |> string.append (list.count rhs |> string.format)
+            |> string.append " fields"
+
+          "mismatched types"
+            |> error
+            |> label span msg
+            |> report state
+
+    :union lhs-vars, :union rhs-vars ->
+      let state = lhs-vars
+        |> list.fold state \state lhs.
+          unify-variant state rhs lhs prov :right
+
+      rhs-vars
+        |> list.fold state \state rhs.
+          unify-variant state lhs rhs prov :left
+
+    :record lhs-fields, :record rhs-fields ->
+      let state = lhs-fields
+        |> list.fold state \state lhs.
+          unify-field state rhs lhs prov :right
+
+      rhs-fields
+        |> list.fold state \state rhs.
+          unify-field state lhs rhs prov :left
+
+    lhs, rhs ->
+      let span = primary-span prov
+
+      let msg = "expected `"
+        |> string.append (format state lhs)
+        |> string.append "`, found `"
+        |> string.append (format state rhs)
+        |> string.append "`"
+
+      "mismatched types"
+        |> error
+        |> label span msg
+        |> explain prov
+        |> report state
+
+local unify-ty-var state ty var prov side =
+  let state = match bound state var
+    :subst subst -> match side
+      :left -> unify state ty subst prov
+      :right -> unify state subst ty prov
+
+    :numeric numeric -> unify-numeric state ty numeric prov side
+
+    :record fields -> fields
+      |> list.fold state \state field.
+        unify-field state ty field prov side
+
+    :union variants -> variants
+      |> list.fold state \state variant.
+        unify-variant state ty variant prov side
+
+    :none -> state
+
+  substitute state var ty
+
+local substitute state var ty =
+  match ty
+    :var var' -> match var' == var
+      :true -> state
+      :false -> match bound state var'
+        :subst ty -> substitute state var ty
+        _ -> set-bound state var (:subst ty)
+    _ -> set-bound state var (:subst ty)
+
+local normalize state ty =
+  match ty
+    :var var -> match bound state var
+      :subst subst -> normalize state subst
+      _            -> state, ty
+
+    :apply (lambda, input) ->
+      let state, lambda = normalize state lambda
+      let state, input = normalize state input
+
+      match lambda
+        :alias alias ->
+          let param, params = list.pop alias.params
+            |> assert-some ""
+
+          let vars = map.insert param.index input map.empty
+          let state, _, body = instantiate-with state vars alias.body
+
+          let alias = :alias {
+            params: params
+            body:   body
+          }
+
+          normalize state alias
+
+        _ -> state, :apply (lambda, input)
+
+    :field (input, name) ->
+      let state, input = normalize state input
+
+      match input
+        :record fields -> match fields |> list.find \f. f.name == name
+          :some field -> normalize state field.ty
+          :none -> state, :field (input, name)
+        _ -> state, :field (input, name)
+
+    :alias alias -> match alias.params
+      [] -> normalize state alias.body
+      _  -> state, ty
+
+    _ -> state, ty
+
+local unify-numeric state ty numeric prov side =
+  let success, state = match ty
+    :var var -> match bound state var
+      :numeric n ->
+        let is-sub = match n, numeric
+          :nat',  :nat'  -> :true
+          :int',  :nat'  -> :true
+          :real', :nat'  -> :true
+          :nat',  :int'  -> :false
+          :int',  :int'  -> :true
+          :real', :int'  -> :true
+          :nat',  :real' -> :false
+          :int',  :real' -> :false
+          :real', :real' -> :true
+
+        match is-sub
+          :true -> :true, set-bound state var (:numeric numeric)
+          :false -> :false, state
+
+      :subst ty -> :true, unify-numeric state ty numeric prov side
+      :none -> :true, set-bound state var (:numeric numeric)
+      _ -> :false, state
+
+    :nat' -> :true, state
+    :int' -> numeric == :int' or numeric == :real', state
+    :real' -> numeric == :real', state
+
+    _ -> :false, state
+
+  match success
+    :true -> state
+    :false ->
+      let span = primary-span prov
+
+      let lhs, rhs = match side
+        :left -> format state ty, format-numeric numeric
+        :right -> format-numeric numeric, format state ty
+
+      let msg = "expected `"
+        |> string.append lhs
+        |> string.append "` found `"
+        |> string.append rhs
+        |> string.append "`"
+
+      "mismatched types"
+        |> error
+        |> label span msg
+        |> explain prov
+        |> report state
+
+local unify-field state ty field prov side =
+  let success, state = match ty
+    :var var -> match bound state var
+      :record fs ->
+        match fs |> list.find \f. f.name == field.name
+          :some f -> match side
+            :left -> :true, unify state field.ty f.ty prov
+            :right -> :true, unify state f.ty field.ty prov
+          :none -> :true, set-bound state var (:record (field :: fs))
+
+      :subst ty -> :true, unify-field state ty field prov side
+      :none -> :true, set-bound state var (:record [field])
+      _ -> :false, state
+
+    :record fs ->
+      match fs |> list.find \f. f.name == field.name
+        :some f -> match side
+          :left -> :true, unify state field.ty f.ty prov
+          :right -> :true, unify state f.ty field.ty prov
+        :none -> :false, state
+
+    _ -> :false, state
+
+  match success
+    :true -> state
+    :false ->
+      let span = primary-span prov
+
+      let msg = "expected `"
+        |> string.append (format state ty)
+        |> string.append "` to have field `"
+        |> string.append field.name
+        |> string.append ": "
+        |> string.append (format state field.ty)
+        |> string.append "`"
+
+      "mismatched types"
+        |> error
+        |> label span msg
+        |> explain prov
+        |> report state
+
+local unify-variant state ty variant prov side =
+  let success, state = match ty
+    :var var -> match bound state var
+      :union vs ->
+        match vs |> list.find \v. v.name == variant.name
+          :some v -> match v.payload, variant.payload
+            :some lhs, :some rhs -> match side
+              :left -> :true, unify state lhs rhs prov
+              :right -> :true, unify state rhs lhs prov
+
+            :none, :none -> :true, state
+            _, _ -> :false, state
+
+          :none -> :true, set-bound state var (:union (variant :: vs))
+
+      :subst ty -> :true, unify-variant state ty variant prov side
+      :none -> :true, set-bound state var (:union [variant])
+      _ -> :false, state
+
+    :union vs -> 
+      match vs |> list.find \v. v.name == variant.name
+        :none -> :false, state
+        :some v -> match v.payload, variant.payload
+          :some lhs, :some rhs -> match side
+            :left -> :true, unify state lhs rhs prov
+            :right -> :true, unify state rhs lhs prov
+
+          :none, :none -> :true, state
+          _, _ -> :false, state
+
+    _ -> :false, state
+
+  match success
+    :true -> state
+    :false ->
+      let span = primary-span prov
+
+      let msg = "expected `"
+        |> string.append (format state ty)
+        |> string.append "` to have variant `:"
+        |> string.append variant.name
+        |> string.append "`"
+
+      "mismatched types"
+        |> error
+        |> label span msg
+        |> explain prov
+        |> report state
+
+is state -> ty -> str
+local format state ty =
+  string.format ty
+
+is numeric -> str
+local format-numeric numeric =
+  match numeric
+    :nat' -> "natural"
+    :int' -> "integer"
+    :real' -> "number"
+
+is provenance -> diagnostic -> diagnostic
+local explain prov diagnostic =
+  match prov
+    :application prov ->
+      diagnostic
+        |> label prov.lambda "required by lambda here"
+
+    :ascription prov ->
+      diagnostic
+        |> label prov.ascription "ascribed here"
+
+    :operator prov ->
+      diagnostic
+        |> label prov.operator "required by operator here"
+
+    :field prov ->
+      diagnostic
+        |> label prov.field "required by field here"
+
+    :list prov ->
+      diagnostic
+        |> label prov.list "required by list initialization here"
+
+    :pat prov ->
+      diagnostic
+        |> label prov.pat "required by pattern here"
+
+    :do-block prov ->
+      diagnostic
+        |> label prov.block "required by do block here"
+
+    :match' prov ->
+      diagnostic
+        |> label prov.match' "required by match here"
+
+is provenance -> span
+local primary-span prov =
+  match prov
+    :application prov -> prov.span
+    :ascription  prov -> prov.span
+    :operator prov    -> prov.span
+    :field prov       -> prov.span
+    :list prov        -> prov.span
+    :pat prov         -> prov.span
+    :do-block prov    -> prov.span
+    :match' prov      -> prov.span
+
+is state -> diagnostic -> state
+local report state diagnostic =
+  state with {
+    diagnostics: diagnostic :: state.diagnostics
+  }
+
+is state -> option str -> bound -> state, var
+local add-var state name bound =
+  let index = map.count state.bounds
+
+  let var = {
+    name:  name
+    index: index
+  }
+
+  let state = state with {
+    bounds: map.insert index bound state.bounds
+  }
+
+  state, var
+
+is state -> state, ty
+local add-inferred state =
+  let state, var = add-var state :none :none
+  state, :var var
+
+is state -> var -> bound
+local bound state var =
+  map.get var.index state.bounds
+    |> assert-some "bounds should always exist"
+
+is state -> var -> bound -> state
+local set-bound state var bound =
+  state with {
+    bounds: map.insert var.index bound state.bounds
+  }

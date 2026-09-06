@@ -187,8 +187,8 @@ pub struct IntrinsicExpr {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Intrinsic {
     Dynamic,
-
     Trace,
+    Panic,
 
     FormatNat,
     FormatInt,

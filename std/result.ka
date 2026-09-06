@@ -1,3 +1,31 @@
+import "std:assert"
+import "std:string"
+
 type result 'a 'e =
   | :ok 'a
   | :err 'e
+
+is 'a -> result 'a 'e -> 'a
+ok-or err x = match x
+  :ok x  -> x
+  :err _ -> err
+
+is ('a -> 'b) -> result 'a 'e -> result 'b 'e
+map-ok f x = match x
+  :ok x  -> :ok f x
+  :err e -> :err e
+
+is ('a -> result 'b 'e) -> result 'a 'e -> result 'b 'e
+try f x = match x
+  :ok x  -> f x
+  :err e -> :err e
+
+is ('a -> !result 'b 'e) -> result 'a 'e -> !result 'b 'e
+try-then f x = match x
+  :ok x  -> f x
+  :err e -> do :err e
+
+is result 'a 'e -> 'a
+assert-ok x = match x
+  :ok x  -> x
+  :err e -> panic (format e)

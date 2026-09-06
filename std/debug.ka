@@ -3,10 +3,10 @@ import "std:string" as string
 import "intrinsic" as intrinsic
 
 is str -> 'a -> 'a
-trace msg x = intrinsic.trace (msg, x)
+trace msg x = intrinsic.trace (append "\n" msg, x)
 
 is 'a -> 'a
-debug x = trace (format x |> append "\n") x
+debug x = trace (format x) x
 
 is 'a -> 'a
-debug-pretty x = trace (format-pretty x |> append "\n") x
+debug-pretty x = trace (format-pretty x) x

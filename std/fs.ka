@@ -1,3 +1,33 @@
-import "std:io" as io
+import "std:io"     as io
+import "std:os"     as os
+import "std:result" as result
+import "std:string" as string
+import "std:list"   as list
 
 extern "fs::read" read is str -> !io.result str
+extern "fs::write" write is str -> str -> !io.result {}
+
+is str -> !bool
+is-dir path = do
+  let result <- os.execute ["test"; "-d"; path]
+
+  do result
+    |> map-ok \code, _. code == 0
+    |> ok-or :false
+
+is str -> !bool
+is-file path = do
+  let result <- os.execute ["test"; "-f"; path]
+
+  do result
+    |> map-ok \code, _. code == 0
+    |> ok-or :false
+
+is str -> !io.result [str]
+read-dir path = do
+  let result <- os.execute ["ls"; "-a"; path]
+
+  do result
+    |> map-ok \_, output.
+      string.split "\n" output
+        |> filter \s. s != "." and s != ".." and s != ""

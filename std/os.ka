@@ -1,0 +1,8 @@
+import "std:io"     as io
+import "std:string" as string
+
+is [str] -> !io.result (nat, str)
+execute args =
+  extern "os::execute" execute is str -> !io.result (nat, str)
+
+  execute (join " " args)

@@ -1,3 +1,5 @@
+import "std:assert"
+
 type option 'a =
   | :some 'a
   | :none
@@ -52,3 +54,9 @@ is-some-and f x =
   match x
     :some x -> f x
     :none -> :false
+
+is str -> option 'a -> 'a
+assert-some message x =
+  match x
+    :some x -> x
+    :none   -> panic message

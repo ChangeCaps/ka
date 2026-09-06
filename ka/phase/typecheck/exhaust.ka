@@ -1,0 +1,480 @@
+import "std:option" as option
+import "std:string" as string
+import "std:list"   as list
+import "std:debug"
+
+import "ka:phase/typecheck" as typecheck
+import "ka:ast"             as ast
+
+type matrix = {
+  rows: [row]
+  cols: [col]
+}
+
+type row = [row-pat]
+
+type row-pat =
+  | :wild
+  | :ctor row-ctor
+
+type row-ctor = {
+  ctor: ctor
+  args: [row-pat]
+}
+
+type ctor =
+  | :empty
+  | :str' str
+  | :cons
+  | :tuple nat
+  | :variant (str, bool)
+
+type col-mat = {
+  cols: [col]
+}
+
+type col =
+  | :wild
+  | :str'
+  | :list (col, col)
+  | :tuple [col]
+  | :union col-union
+
+type col-union = {
+  variants: [str, option col]
+  is-open:  bool
+}
+
+is matrix
+matrix = {
+  rows: []
+  cols: [:wild]
+}
+
+is pat name -> row
+row pat = [row-pat pat]
+
+is matrix -> pat name -> option matrix
+add-pat mat pat =
+  let row = [row-pat pat]
+
+  col-pat pat
+    |> try-map-some \col.
+      first mat.cols
+        |> assert-some "matrix should always have a column"
+        |> col-merge col
+    |> map-some \col.
+      {
+        rows: list.append [row] mat.rows
+        cols: [col]
+      }
+
+is matrix -> row -> matrix
+add-row mat row = mat with {
+  rows: row :: mat.rows
+}
+
+is matrix -> matrix
+open mat = {
+  rows: mat.rows
+  cols: open-cols mat
+}
+
+is matrix -> matrix
+reset mat = mat with {
+  rows: []
+}
+
+is matrix -> row -> bool
+is-useful mat row =
+  match first row
+    :none -> mat.rows |> all is-not-empty
+    :some pat ->
+      match pat
+        :ctor row-ctor ->
+          let mat = specialize row-ctor.ctor mat
+          let row = specialize-row row-ctor.ctor row
+            |> assert-some "rows can always be specialized by their own constructor"
+
+          is-useful mat row
+
+        :wild ->
+          let col = first mat.cols
+            |> assert-some ""
+
+          match col-ctors col
+            :none ->
+              let mat = default mat
+              let row = skip 1 row
+
+              is-useful mat row
+
+            :some ctors ->
+              ctors |> any \ctor.
+                let mat = specialize ctor mat
+                let row = specialize-row ctor row
+                  |> assert-some ""
+
+                is-useful mat row
+
+is matrix -> [str]
+missing mat =
+  missing-rows mat
+    |> map \row. first row
+    |> filter-some
+    |> map (format-row-pat 0)
+
+is matrix -> [row]
+local missing-rows mat =
+  match first mat.cols
+    :some col -> match col-ctors col
+      :some ctors ->
+        ctors
+          |> map \ctor.
+            specialize ctor mat
+              |> missing-rows
+              |> map \row.
+                let arity = (arity ctor)
+                let args = take arity row
+                :ctor { ctor: ctor; args: args } :: skip arity row
+          |> flatten
+
+      :none ->
+        default mat
+          |> missing-rows
+          |> map \row. :wild :: row
+
+    :none ->
+      match mat.rows |> all is-not-empty
+        :true -> [[]]
+        :false -> []
+
+local open-cols mat =
+  match first mat.cols
+    :some col ->
+      match col-ctors col
+        :some ctors -> ctors
+          |> map \ctor.
+            let cols = mat
+              |> specialize ctor
+              |> open-cols
+
+            match ctor
+              :str' _ -> :str' :: cols
+
+              :cons ->
+                let item, cols = pop cols |> assert-some ""
+                let list, cols = pop cols |> assert-some ""
+
+                :list (item, list) :: cols
+
+              :empty ->
+                :list (:wild, :wild) :: cols
+
+              :tuple n ->
+                let fields = take n cols
+                :tuple fields :: skip n cols
+
+              :variant (name, payload) ->
+                let payload, cols = match payload
+                  :true ->
+                    let payload, cols = pop cols |> assert-some ""
+                    :some payload, cols
+                  :false -> :none, cols
+
+                let union = {
+                  variants: [name, payload]
+                  is-open:  is-wild mat
+                }
+
+                :union union :: cols
+          |> reduce \a b.
+            zip b a
+              |> map \a, b. col-merge a b
+              |> maybe
+              |> assert-some ""
+          |> assert-some ""
+
+        :none -> :wild :: open-cols (mat-tail mat)
+
+    :none -> []
+
+local is-wild mat =
+  mat.rows |> any \row. first row == :some :wild
+
+local mat-tail mat = {
+  rows: skip 1 mat.rows
+  cols: skip 1 mat.cols
+}
+
+local default mat = {
+  rows: mat.rows
+    |> filter-map \row.
+      match first row == :some :wild
+        :true  -> tail row
+        :false -> :none
+  cols: skip 1 mat.cols
+}
+
+local specialize ctor mat = {
+  rows: mat.rows |> filter-map (specialize-row ctor)
+  cols: mat.cols |> specialize-cols ctor
+}
+
+local arity ctor =
+  match ctor
+    :empty   -> 0
+    :str' _  -> 0
+    :cons    -> 2
+    :tuple n -> n
+
+    :variant (_, payload) ->
+      match payload
+        :true  -> 1
+        :false -> 0
+
+is ctor -> row -> option row
+local specialize-row ctor row =
+  match first row
+    :some :wild ->
+      let row = row
+        |> skip 1
+        |> prepend (repeat (arity ctor) :wild)
+
+      :some row
+
+    :some :ctor row-ctor ->
+      match row-ctor.ctor == ctor
+        :true ->
+          let row = row
+            |> skip 1
+            |> prepend row-ctor.args
+
+          :some row
+
+        :false -> :none
+
+    :none -> :none
+
+is ctor -> [col] -> [col]
+local specialize-cols ctor cols =
+  match first cols |> assert-some ""
+    :wild ->
+      cols
+        |> skip 1
+        |> prepend (repeat (arity ctor) :wild)
+
+    :str' -> skip 1 cols
+
+    :list (item, list) ->
+      match ctor
+        :cons ->
+          cols
+            |> skip 1
+            |> prepend [item; list]
+
+        :empty -> skip 1 cols
+
+        _ -> cols
+
+    :tuple fields ->
+      cols
+        |> skip 1
+        |> prepend fields
+
+    :union union ->
+      match ctor
+        :variant (name, _) ->
+          let _, payload = union.variants
+            |> find \n, _. n == name
+            |> assert-some "col always all variants"
+
+          match payload
+            :some payload ->
+              cols
+                |> skip 1
+                |> push payload
+
+            :none -> skip 1 cols
+
+        _ -> cols
+
+local row-pat pat =
+  match pat
+    :wild _ -> :wild
+    :bind _ -> :wild
+    :error _ -> :wild
+
+    :paren pat -> row-pat pat.pat
+
+    :str' pat -> :ctor {
+      ctor: :str' pat.value
+      args: []
+    }
+
+    :empty pat -> :ctor {
+      ctor: :empty
+      args: []
+    }
+
+    :cons pat -> :ctor {
+      ctor: :cons
+      args: [row-pat pat.first; row-pat pat.rest]
+    }
+
+    :tuple pat -> :ctor {
+      ctor: :tuple count pat.fields
+      args: pat.fields |> map row-pat
+    }
+
+    :variant pat -> :ctor {
+      ctor: :variant (pat.name, is-some pat.payload)
+      args: match pat.payload
+        :some payload -> [row-pat payload]
+        :none -> []
+    }
+
+local format-row-pat p pat =
+  let paren p' s =
+    match p > p'
+      :true -> "(" |> string.append s |> string.append ")"
+      :false -> s
+
+  match pat
+    :wild -> "_"
+    :ctor pat ->
+      match pat.ctor
+        :str' s -> "\"" |> string.append s |> string.append "\""
+
+        :cons ->
+          match pat.args
+            head :: tail :: _ ->
+              format-row-pat 2 head
+                |> string.append " :: "
+                |> string.append (format-row-pat 1 tail)
+                |> paren 1
+
+            _ -> ""
+
+        :empty -> "[]"
+
+        :tuple _ ->
+          pat.args
+            |> map (format-row-pat 1)
+            |> string.join ", "
+            |> paren 0
+
+        :variant (name, _) ->
+          match first pat.args
+            :some payload ->
+              name
+                |> string.prepend ":"
+                |> string.append " "
+                |> string.append (format-row-pat 2 payload)
+                |> paren 2
+
+            :none -> name |> string.prepend ":"
+
+is pat name -> option col
+local col-pat pat =
+  match pat
+    :wild _ -> :some :wild
+    :bind _ -> :some :wild
+    :error _ -> :some :wild
+
+    :str' _ -> :some :str'
+
+    :paren pat -> col-pat pat.pat
+
+    :empty pat -> :some :list (:wild, :wild)
+
+    :cons pat ->
+      col-pat pat.first
+        |> try-map-some \first.
+          col-pat pat.rest
+            |> try-map-some \rest.
+              :list (first, :wild)
+                |> col-merge rest
+
+    :tuple pat ->
+      pat.fields
+        |> map col-pat 
+        |> maybe
+        |> map-some \xs. :tuple xs
+
+    :variant pat ->
+      match pat.payload
+        :some payload ->
+          col-pat payload
+            |> map-some \payload.
+              :union {
+                variants: [pat.name, :some payload]
+                is-open:  :false
+              }
+
+        :none -> :some :union {
+          variants: [pat.name, :none]
+          is-open:  :false
+        }
+
+is col -> col -> option col
+local col-merge a b =
+  match a, b
+    :wild, col -> :some col
+    col, :wild -> :some col
+
+    :str', :str' -> :some :str'
+
+    :list (a-item, a-list), :list (b-item, b-list) ->
+      col-merge a-item b-item
+        |> try-map-some \item.
+          col-merge a-list b-list
+            |> map-some \list. :list (item, list) 
+
+    :tuple a, :tuple b ->
+      match count a == count b
+        :true ->
+          zip b a
+            |> map \a, b. col-merge a b
+            |> maybe
+            |> map-some \fields. :tuple fields
+        :false -> :none
+
+    :union a, :union b ->
+      a.variants
+        |> maybe-fold b.variants \variants a-name, a-payload.
+          match variants |> list.find \b-name, _. b-name == a-name
+            :some (b-name, b-payload) ->
+              match a-payload, b-payload
+                :some a-payload, :some b-payload ->
+                  col-merge a-payload b-payload
+                    |> map-some \payload.
+                      (a-name, :some payload) :: variants
+
+                :none, :none -> :some variants
+
+                _, _ -> :none
+
+            :none -> :some ((a-name, a-payload) :: variants)
+        |> map-some \variants.
+          :union {
+            variants: variants
+            is-open:  a.is-open and b.is-open
+          }
+
+    _, _ -> :none
+
+is col -> option [ctor]
+local col-ctors col =
+  match col
+    :wild -> :none
+    :str' -> :none
+    :list _ -> :some [:empty; :cons]
+    :tuple fields -> :some [:tuple count fields]
+    :union union -> match union.is-open
+      :true -> :none
+      :false ->
+        let ctors = union.variants
+          |> map \name, payload. :variant (name, is-some payload)
+
+        :some ctors

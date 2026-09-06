@@ -14,10 +14,10 @@ type def =
   | :error   span
 
 type ty 'name =
+  | :str'    str-ty 'name
   | :nat'    nat-ty 'name
   | :int'    int-ty 'name
   | :real'   real-ty 'name
-  | :str'    str-ty 'name
   | :var     var-ty 'name
   | :paren   paren-ty 'name
   | :list    list-ty 'name
@@ -28,6 +28,7 @@ type ty 'name =
   | :union   union-ty 'name
   | :apply   apply-ty 'name
   | :action  action-ty 'name
+  | :field   field-ty 'name
   | :error   span
 
 type pat 'name =
@@ -43,7 +44,7 @@ type pat 'name =
 
 type expr 'name =
   | :paren    paren-expr 'name
-  | :nat'     nat-expr   'name
+  | :nat'     nat-expr  'name
   | :str'     str-expr 'name
   | :var      var-expr 'name
   | :field    field-expr 'name
@@ -129,7 +130,7 @@ type action-ty 'name = {
 }
 
 type generic-ty 'name = {
-  name: str
+  name: 'name
   span: span
 }
 
@@ -152,6 +153,12 @@ type apply-ty 'name = {
   lambda: ty 'name
   input:  ty 'name
   span:   span
+}
+
+type field-ty 'name = {
+  input: ty 'name
+  name:  str
+  span:  span
 }
 
 type ty-field 'name = {
@@ -227,9 +234,10 @@ type var-expr 'name = {
 }
 
 type field-expr 'name = {
-  input: expr 'name
-  name:  str
-  span:  span
+  input:     expr 'name
+  name:      str
+  name-span: span
+  span:      span
 }
 
 type with-expr 'name = {
@@ -278,16 +286,18 @@ type tuple-expr 'name = {
 }
 
 type unary-expr 'name = {
-  op:    unop
-  input: expr 'name
-  span:  span
+  op:      unop
+  op-span: span
+  input:   expr 'name
+  span:    span
 }
 
 type binary-expr 'name = {
-  lhs:  expr 'name
-  op:   binop
-  rhs:  expr 'name
-  span: span
+  lhs:     expr 'name
+  op:      binop
+  op-span: span
+  rhs:     expr 'name
+  span:    span
 }
 
 type block-expr 'name = {
@@ -366,3 +376,59 @@ type binop =
   | :lor
   | :cons
 
+is ty 'a -> span
+ty-span ty =
+  match ty
+    :str' ty    -> ty.span
+    :nat' ty    -> ty.span
+    :int' ty    -> ty.span
+    :real' ty   -> ty.span
+    :var ty     -> ty.span
+    :paren ty   -> ty.span
+    :list ty    -> ty.span
+    :lambda ty  -> ty.span
+    :generic ty -> ty.span
+    :record ty  -> ty.span
+    :tuple ty   -> ty.span
+    :union ty   -> ty.span
+    :apply ty   -> ty.span
+    :action ty  -> ty.span
+    :field ty   -> ty.span
+    :error span -> span
+
+is pat 'a -> span
+pat-span pat =
+  match pat
+    :paren pat   -> pat.span
+    :wild pat    -> pat.span
+    :bind pat    -> pat.span
+    :str' pat    -> pat.span
+    :empty pat   -> pat.span
+    :cons pat    -> pat.span
+    :tuple pat   -> pat.span
+    :variant pat -> pat.span
+    :error span  -> span
+
+is expr 'a -> span
+expr-span expr =
+  match expr 
+    :paren expr    -> expr.span
+    :nat' expr     -> expr.span
+    :str' expr     -> expr.span
+    :var  expr     -> expr.span
+    :field expr    -> expr.span
+    :with' expr    -> expr.span
+    :apply expr    -> expr.span
+    :pipe expr     -> expr.span
+    :lambda expr   -> expr.span
+    :list expr     -> expr.span
+    :variant expr  -> expr.span
+    :record expr   -> expr.span
+    :tuple expr    -> expr.span
+    :unary expr    -> expr.span
+    :binary expr   -> expr.span
+    :block expr    -> expr.span
+    :do' expr      -> expr.span
+    :do-block expr -> expr.span
+    :match' expr   -> expr.span
+    :error  span   -> span

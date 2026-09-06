@@ -32,5 +32,5 @@ local hash-dynamic x =
       |> fold 0 xor
 
     :variant (n, x) -> match x
-      :none -> hash n
       :some x -> xor (hash n) (hash-dynamic x)
+      :none -> hash n

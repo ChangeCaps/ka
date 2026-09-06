@@ -1,37 +1,113 @@
 import "std:io" as io
 import "std:fs" as fs
-import "std:string"
-import "std:list"
+import "std:debug"
+import "std:string" as string
+import "std:result" as result
+import "std:option" as option
+import "std:list"   as list
 
 import "ka:parse/lex"
 import "ka:parse/parser"
 import "ka:diagnostic/format"
 import "ka:phase/rename"
+import "ka:phase/typecheck"
 import "ka:parse"
 
 main = do
-  let file = {
-    path: "test.ka"
-  }
+  let result <- compiler
+    |> add-package "test" "test"
 
-  let input <- fs.read file.path
+  match result
+    :ok compiler -> compile compiler
+    :err e -> print e 
 
-  match input
-    :err _ -> do {}
-    :ok input -> do
-      let ts, ds = lex file input
-      let ast = parse ts module
+compiler = {
+  files: []
+  diagnostics: []
+}
 
-      match ast
-        :none -> do {}
-        :some (ast, ds') -> do
-          let ds = append ds' ds
+compile compiler = do
+  let renamed, ds' = rename compiler.files
+  let ds = append ds' compiler.diagnostics
 
-          let renamed, ds' = rename ["test", ast]
-          let ds = append ds' ds
+  let typechecked, ds' = typecheck renamed
+  let ds = append ds' ds
 
-          print-all ds
-
-          do {}
+  print-all ds
 
   do {}
+
+add-package name path compiler =
+  let name = string.append ":" name
+  add-package-dir name path compiler
+
+add-package-dir parent path compiler = do
+  let result <- fs.read-dir path
+
+  result |> try-then \paths. do
+    paths |> mfold (:ok compiler) \compiler entry. do
+      let path = path
+        |> string.append "/"
+        |> string.append entry
+
+      compiler |> try-then (add-package-path parent path)
+
+add-package-path parent path compiler = do
+  let is-dir <- fs.is-dir path
+
+  match is-dir
+    :true -> match file-name path
+      :some name ->
+        let name = parent
+          |> string.append "/"
+          |> string.append name
+
+        add-package-dir name path compiler
+      :none -> do :ok compiler
+
+    :false -> add-package-file parent path compiler
+
+add-package-file parent path compiler =
+  match file-extension path, file-stem path
+    :some "ka", :some name -> do
+      let result <- fs.read path
+
+      result |> try-then \input. do
+        let file = {
+          path: path
+        }
+
+        let ts, ds = lex file input
+        let ast, ds' = parse ts module
+          |> assert-some "parsing never fails"
+
+        let name = string.append name parent
+
+        let compiler = compiler with {
+          files: (name, ast) :: compiler.files 
+          diagnostics: compiler.diagnostics
+            |> list.append ds
+            |> list.append ds'
+        }
+
+        do :ok compiler
+    _ -> do :ok compiler
+
+file-name path =
+  string.split "/" path |> last
+
+file-extension path =
+  file-name path
+    |> try-map-some \name.
+      string.find "." name
+        |> map-some \n.
+          let _, extension = string.split-at (n + 1) name
+          extension
+
+file-stem path =
+  file-name path
+    |> try-map-some \name.
+      string.find "." name
+        |> map-some \n.
+          let stem, _ = string.split-at n name
+          stem

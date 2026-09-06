@@ -20,8 +20,8 @@ format-all diagnostics = match diagnostics
     let formatted <- diagnostics
       |> each diagnostic
 
-    do join "\n\n" formatted
-      |> append "\n\n"
+    do join "\n" formatted
+      |> append "\n"
       |> append (summary diagnostics)
       |> append "\n"
 
@@ -47,22 +47,30 @@ local summary ds =
       |> append (format ws)
       |> append " warnings"
 
-local diagnostic d =
-  header d
+local diagnostic d = do
+  let header <- header d
+  let labels <- d.labels
+    |> reverse
+    |> each (label d)
+
+  let note = match d.note
+    :some n -> note d n
+    :none -> ""
+
+  do header
+    |> append "\n"
+    |> append (join "\n" labels)
+    |> append "\n"
+    |> append note
 
 local header d = do
   let severity = match d.severity
     :error   -> "error" |> bold |> red
     :warning -> "warning" |> bold |> yellow
 
-  let labels <- d.labels
-    |> each (label d)
-
   do severity
     |> append (bold ": ")
     |> append (bold d.message)
-    |> append "\n"
-    |> append (join "\n" labels)
 
 local label d l = do
   let source <- source l.span.file
@@ -84,7 +92,7 @@ local label d l = do
     |> append line-str
     |> append ":"
     |> append column-str
-  
+
   let spacer = repeat spaces " "
     |> append ("|" |> blue |> bold)
 
@@ -115,6 +123,32 @@ local label d l = do
     |> append code
     |> append "\n"
     |> append label
+
+local note d n =
+  let lines = string.split "\n" n
+    |> fold ("") \note line.
+      let prefix = match note
+        "" ->
+          blue (bold "=")
+            |> append " "
+            |> append (bold "note:")
+        _ -> match line
+          "" -> blue (bold "|")
+          _ ->
+            blue (bold "~")
+              |> append "      "
+
+      "  "
+        |> append prefix
+        |> append " "
+        |> append line
+        |> append "\n"
+        |> prepend note
+
+  "  "
+    |> append ("|" |> blue |> bold)
+    |> append "\n"
+    |> append lines
 
 local find-line n s i ls =
   match ls

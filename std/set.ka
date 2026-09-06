@@ -1,0 +1,25 @@
+import "std:map"  as map
+import "std:list" as list
+
+type set 'k = map 'k {}
+
+is set 'k
+empty = map.empty
+
+is 'k -> set 'k -> set 'k
+insert key set = map.insert key {} set
+
+is 'k -> set 'k -> bool
+has key set = map.has key set
+
+is set 'k -> nat
+count set = map.count set
+
+is 'k -> set 'k -> set 'k
+remove key set = map.remove key set
+
+is set 'k -> ['k]
+list set = map.keys set
+
+is set 'k -> set 'k -> set 'k
+union b a = list b |> fold a \s x. insert x s

@@ -301,7 +301,7 @@ impl Lowerer<'_> {
                 Ty::Union(ty) => {
                     let f = recurse_union(lowerer, ty, infos);
 
-                    if precedence > 4 { format!("({f})") } else { f }
+                    if precedence >= 4 { format!("({f})") } else { f }
                 }
 
                 Ty::Alias(ty) => {

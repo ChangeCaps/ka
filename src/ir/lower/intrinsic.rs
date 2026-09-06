@@ -12,8 +12,8 @@ impl Lowerer<'_> {
         self.imports.insert("intrinsic", scope);
 
         self.add_dynamic();
-
         self.add_trace();
+        self.add_panic();
 
         self.add_format_nat();
         self.add_format_int();
@@ -108,6 +108,12 @@ impl Lowerer<'_> {
         let ty = self.add_inferred_type();
 
         self.add_intrinsic("trace", Intrinsic::Trace, [Ty::Str, ty.clone()], ty);
+    }
+
+    fn add_panic(&mut self) {
+        let ty = self.add_inferred_type();
+
+        self.add_intrinsic("panic", Intrinsic::Panic, [Ty::Str], ty);
     }
 
     fn add_format_nat(&mut self) {

@@ -141,7 +141,7 @@ impl<'a> Codegen<'a> {
 
             Expr::Field(expr) => {
                 let input = self.expr(&expr.input);
-                format!("{input}['{}']", expr.name)
+                format!("{input}[\"{}\"]", expr.name)
             }
 
             Expr::Lambda(expr) => {
@@ -162,7 +162,7 @@ impl<'a> Codegen<'a> {
                 format!("cons({item}, {list})")
             }
 
-            Expr::Empty(..) => String::from("nil"),
+            Expr::Empty(..) => String::from("{ ['$empty'] = true }"),
 
             Expr::Variant(expr) => {
                 if expr.name == "true" && expr.payload.is_none() {
@@ -187,7 +187,7 @@ impl<'a> Codegen<'a> {
                     .iter()
                     .map(|field| {
                         let expr = self.expr(&field.expr);
-                        format!("['{}'] = {}", field.name, expr)
+                        format!("[\"{}\"] = {}", field.name, expr)
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -290,6 +290,12 @@ impl<'a> Codegen<'a> {
                         format!("trace({message}, {input})")
                     }
 
+                    Intrinsic::Panic => {
+                        let message = inputs.next().unwrap();
+
+                        format!("panic({message})")
+                    }
+
                     Intrinsic::FormatNat | Intrinsic::FormatInt | Intrinsic::FormatReal => {
                         let input = inputs.next().unwrap();
                         format!("tostring({input})")
@@ -309,7 +315,7 @@ impl<'a> Codegen<'a> {
                         let lhs = inputs.next().unwrap();
                         let rhs = inputs.next().unwrap();
 
-                        format!("{lhs} ^ {rhs}")
+                        format!("bit.bxor({lhs}, {rhs})")
                     }
 
                     Intrinsic::StrLength => {
@@ -390,10 +396,10 @@ impl<'a> Codegen<'a> {
                 let first = self.check(&pat.first, &first);
                 let rest = self.check(&pat.rest, &rest);
 
-                format!("{input} ~= nil and {first} and {rest}")
+                format!("{input}['$empty'] == nil and {first} and {rest}")
             }
 
-            Pat::Empty(..) => format!("{input} == nil"),
+            Pat::Empty(..) => format!("{input}['$empty'] ~= nil"),
 
             Pat::Str(pat) => {
                 let s = Self::escape(pat.string);
