@@ -1,0 +1,54 @@
+type option 'a =
+  | :some 'a
+  | :none
+
+is ('a -> 'b) -> option 'a -> option 'b
+map-some f x =
+  match x
+    :some x -> :some f x
+    :none -> :none
+
+is ('a -> option 'b) -> option 'a -> option 'b
+try-map-some f x =
+  match x
+    :some x -> f x
+    :none -> :none
+
+is 'a -> option 'a -> 'a
+some-or otherwise x =
+  match x
+    :some x -> x
+    :none -> otherwise
+
+is option 'a -> option 'a -> option 'a
+some-else otherwise x =
+  match x
+    :some x -> :some x
+    :none -> otherwise
+
+is option 'a -> bool
+is-some x =
+  match x
+    :some _ -> :true
+    :none -> :false
+
+is option 'a -> bool
+is-none x =
+  match x
+    :some _ -> :false
+    :none -> :true
+
+is ('a -> bool) -> option 'a -> option 'a
+some-if f x =
+  match x
+    :none -> :none
+    :some x ->
+      match f x
+        :true -> :some x
+        :false -> :none
+
+is ('a -> bool) -> option 'a -> bool
+is-some-and f x =
+  match x
+    :some x -> f x
+    :none -> :false

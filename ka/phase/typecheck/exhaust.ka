@@ -3,6 +3,7 @@ import "std:string" as string
 import "std:list"   as list
 import "std:debug"
 
+import "ka:phase/rename"    as rename
 import "ka:phase/typecheck" as typecheck
 import "ka:ast"             as ast
 
@@ -51,10 +52,10 @@ matrix = {
   cols: [:wild]
 }
 
-is pat name -> row
+is pat name 'a -> row
 row pat = [row-pat pat]
 
-is matrix -> pat name -> option matrix
+is matrix -> pat name 'a -> option matrix
 add-pat mat pat =
   let row = [row-pat pat]
 
@@ -375,7 +376,7 @@ local format-row-pat p pat =
 
             :none -> name |> string.prepend ":"
 
-is pat name -> option col
+is pat name 'a -> option col
 local col-pat pat =
   match pat
     :wild _ -> :some :wild

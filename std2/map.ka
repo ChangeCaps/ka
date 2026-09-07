@@ -1,0 +1,113 @@
+type map 'k 'v = option {
+  hash:  nat
+  key:   'k
+  value: 'v
+  lhs:   map 'k 'v
+  rhs:   map 'k 'v
+}
+
+is map 'k 'v
+empty = :none
+
+is 'k -> 'v -> map 'k 'v -> map 'k 'v
+insert key value map = insert-hashed (hash key) key value map
+
+is 'k -> map 'k 'v -> option 'v
+get key map = get-hashed (hash key) key map
+
+is 'k -> map 'k 'v -> bool
+has key map = get key map |> is-some
+
+is map 'k 'v -> nat
+count map =
+  match map
+    :some node -> 1 + count node.lhs + count node.rhs
+    :none -> 0
+
+is 'k -> map 'k 'v -> map 'k 'v
+remove key map = remove-hashed (hash key) key map
+
+is map 'k 'v -> ['k, 'v]
+pairs map = extend-list map []
+
+is map 'k 'v -> ['k]
+keys map = pairs map |> list.map \k, _. k
+
+is map 'k 'v -> ['v]
+values map = pairs map |> list.map \_, v. v
+
+local extend-list map xs = match map
+  :none -> xs
+  :some node -> xs
+    |> push (node.key, node.value)
+    |> extend-list node.rhs
+    |> extend-list node.lhs
+
+local insert-hashed hash key value map =
+  match map
+    :none -> :some {
+      hash: hash
+
+      key: key
+      value: value
+
+      lhs: :none
+      rhs: :none
+    }
+
+    :some node -> match node.hash == hash and node.key == key
+      :true -> :some node with {
+        value: value
+      }
+
+      :false -> match hash > node.hash
+        :true -> :some node with {
+          rhs: insert-hashed hash key value node.rhs
+        }
+
+        :false -> :some node with {
+          lhs: insert-hashed hash key value node.lhs
+        }
+
+local get-hashed hash key map =
+  map |> try-map-some \node.
+    match node.key == key
+      :true -> :some node.value
+      :false -> match hash > node.hash
+        :true -> get-hashed hash key node.rhs
+        :false -> get-hashed hash key node.lhs
+
+local remove-hashed hash key map =
+  map |> try-map-some \node.
+    match node.hash == hash and node.key == key
+      :true -> match node.lhs, node.rhs
+        :none, :none -> :none
+
+        :some lhs, :none -> :some lhs
+        :none, :some rhs -> :some rhs
+
+        :some lhs, :some rhs ->
+          let hash, key, value = smallest rhs
+
+          :some node with {
+            hash: hash
+
+            key: key
+            value: value
+
+            rhs: remove-hashed hash key (:some rhs)
+          }
+
+      :false -> match hash > node.hash
+        :true -> :some node with {
+          rhs: remove-hashed hash key node.rhs
+        }
+
+        :false -> :some node with {
+          lhs: remove-hashed hash key node.lhs
+        }
+
+local smallest node =
+    match node.lhs
+      :none -> node.hash, node.key, node.value
+      :some lhs -> smallest lhs

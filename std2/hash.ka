@@ -11,13 +11,13 @@ hash x = hash-dynamic (dynamic x)
 
 local hash-dynamic x =
   match x
-    :lambda -> intrinsic.hash-int 0
-    :action -> intrinsic.hash-int 1
+    :lambda -> intrinsic.int-hash 0
+    :action -> intrinsic.int-hash 1
 
-    :str' x -> intrinsic.hash-str x
-    :nat' x -> intrinsic.hash-nat x
-    :int' x -> intrinsic.hash-int x
-    :real' x -> intrinsic.hash-real x
+    :str' x -> intrinsic.str-hash x
+    :nat' x -> intrinsic.nat-hash x
+    :int' x -> intrinsic.int-hash x
+    :real' x -> intrinsic.real-hash x
 
     :list xs -> xs
       |> map hash-dynamic
@@ -32,5 +32,5 @@ local hash-dynamic x =
       |> fold 0 xor
 
     :variant (n, x) -> match x
-      :some x -> xor (intrinsic.hash-str n) (hash-dynamic x)
-      :none -> intrinsic.hash-str n
+      :some x -> xor (intrinsic.str-hash n) (hash-dynamic x)
+      :none -> intrinsic.str-hash n

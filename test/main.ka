@@ -1,6 +1,0 @@
-import "test:maybe" as maybe
-import "test:main" as main
-
-type foo = maybe
-
-x = maybe.some-or

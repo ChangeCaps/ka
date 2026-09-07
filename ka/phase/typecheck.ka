@@ -13,21 +13,9 @@ import "ka:ast"                   as ast
 import "ka:phase/typecheck/exhaust" as exhaust
 
 type typechecked = {
-  globals: map unique global
+  bounds:  map nat bound
+  globals: [global]
 }
-
-type unique = rename.unique
-type kind   = rename.kind
-
-type name = {
-  unique: unique
-  label:  str
-  kind:   kind
-  span:   span
-  ty:     ty
-}
-
-type rty = ast.ty rename.name
 
 type ty =
   | :var var
@@ -46,8 +34,10 @@ type ty =
   | :union [variant]
 
 type alias = {
+  name:   str
   params: [var]
-  body: ty
+  inputs: [ty]
+  body:   ty
 }
 
 type field = {
@@ -77,7 +67,12 @@ type numeric =
   | :int'
   | :real'
 
-type global = {}
+type global = {
+  pat:    pat name ty
+  params: [pat name ty]
+  output: expr name ty
+  span:   span
+}
 
 typecheck renamed =
   let state = {
@@ -93,15 +88,22 @@ typecheck renamed =
   let state = renamed.aliases
     |> list.fold state typecheck-alias
 
-  let state, checked = renamed.globals
+  let state, checked, globals = renamed.globals
     |> map.values
-    |> list.fold (state, set.empty) (typecheck-global renamed.globals)
+    |> list.fold (state, set.empty, []) \state, checked, globals global.
+      let state, checked, output = typecheck-global renamed.globals state checked global
+      state, checked, list.append output globals
 
-  {}, state.diagnostics
+  let program = {
+    bounds:  state.bounds
+    globals: globals
+  }
+
+  program, state.diagnostics
 
 local type state = {
   this:   unique
-  names:  map unique name
+  names:  map unique ty
   cache:  map (ty, ty) {}
   bounds: map nat bound
   diagnostics: [diagnostic]
@@ -151,12 +153,6 @@ local type provenance =
     span:   span
   }
 
-local type rexpr = expr rename.name
-local type texpr = expr name
-
-local type rpat = pat rename.name
-local type tpat = pat name
-
 local bool = :union [
   {
     name: "true"
@@ -173,17 +169,19 @@ local unit = :record []
 local typecheck-alias state alias =
   let state, params = alias.params
     |> list.rfold (state, []) \state, params param.
-      let state, param = name state param
+      let state, ty = name-ty state param
 
-      match param.ty
+      match ty
         :var var -> state, var :: params
         _ -> state, params
 
-  let state, name = name state alias.name
+  let state, name-ty = name-ty state alias.name
   let state, body = typecheck-ty state alias.ty
 
   let ty = :alias {
+    name:   alias.name.label
     params: params
+    inputs: []
     body:   body
   }
 
@@ -192,21 +190,21 @@ local typecheck-alias state alias =
     span: ty-span alias.ty
   }
 
-  let state = unify state ty name.ty prov
+  unify state ty name-ty prov
 
-  state
-
-local typecheck-global globals state, checked global =
+local typecheck-global globals state checked global =
   match set.has global.unique checked
-    :true -> state, checked
+    :true -> state, checked, []
     :false ->
       let checked = set.insert global.unique checked
 
-      let state, checked = map.get global.unique state.dependencies
+      let state, checked, globals = map.get global.unique state.dependencies
         |> some-or set.empty
         |> set.list
         |> list.filter-map \global. map.get global globals
-        |> list.fold (state, checked) (typecheck-global globals)
+        |> list.fold (state, checked, []) \state, checked, outputs global.
+          let state, checked, output = typecheck-global globals state checked global
+          state, checked, list.append output outputs
 
       let state, pat-ty, pat = typecheck-pat state global.pat :false
       let state, param-tys, params = typecheck-pats state global.params :false
@@ -223,8 +221,6 @@ local typecheck-global globals state, checked global =
         span: expr-span output
       }
 
-      let state = unify state pat-ty ty prov
-
       let state = match global.ty
         :some ascribed ->
           let prov = :ascription {
@@ -236,7 +232,16 @@ local typecheck-global globals state, checked global =
           unify state ascribed ty prov
         :none -> state
 
-      state, checked
+      let state = unify state pat-ty ty prov
+
+      let global = {
+        pat:    pat
+        params: params
+        output: output
+        span:   global.span
+      }
+
+      state, checked, global :: globals
 
 is state -> [unique] -> unique -> bool
 local is-recursive state seen global =
@@ -249,13 +254,13 @@ local is-recursive state seen global =
         |> set.list
         |> list.any (is-recursive state (global :: seen))
 
-is state -> [rty] -> state, [ty]
+is state -> [ast.ty name] -> state, [ty]
 local typecheck-tys state tys =
   tys |> list.fold (state, []) \state, tys ty.
     let state, ty = typecheck-ty state ty
     state, list.append [ty] tys
 
-is state -> rty -> state, ty
+is state -> ast.ty name -> state, ty
 local typecheck-ty state ty =
   match ty
     :str' ty -> state, :str'
@@ -263,12 +268,7 @@ local typecheck-ty state ty =
     :int' ty -> state, :int'
     :real' ty -> state, :real'
 
-    :var ty ->
-      match map.get ty.name.unique state.names
-        :some name -> state, name.ty
-        :none ->
-          let state, ty = add-inferred state
-          state, ty
+    :var ty -> name-ty state ty.name
 
     :paren ty -> typecheck-ty state ty.ty
 
@@ -282,9 +282,7 @@ local typecheck-ty state ty =
 
       state, :lambda (input, output)
 
-    :generic ty ->
-      let state, name = name state ty.name
-      state, name.ty
+    :generic ty -> name-ty state ty.name
 
     :tuple ty ->
       let state, fields = typecheck-tys state ty.fields
@@ -362,13 +360,13 @@ local typecheck-ty state ty =
 
     :error span -> add-inferred state
 
-is state -> [rpat] -> bool -> state, [ty], [tpat]
+is state -> [pat name {}] -> bool -> state, [ty], [pat name ty]
 local typecheck-pats state pats open =
   pats |> list.fold (state, [], []) \state, tys, pats pat.
     let state, ty, pat = typecheck-pat state pat open
     state, list.append [ty] tys, list.append [pat] pats
 
-is state -> rpat -> bool -> state, ty, tpat
+is state -> pat name {} -> bool -> state, ty, pat name ty
 local typecheck-pat state pat open =
   match pat
     :paren pat ->
@@ -387,11 +385,12 @@ local typecheck-pat state pat open =
       }
 
     :bind pat ->
-      let state, name = name state pat.name
+      let state, ty = name-ty state pat.name
 
-      state, name.ty, :bind {
-        name: name
+      state, ty, :bind {
+        name: pat.name
         span: pat.span
+        ty:   ty
       }
 
     :str' pat ->
@@ -456,13 +455,13 @@ local typecheck-pat state pat open =
       let state, ty = add-inferred state
       state, ty, :error span
 
-is state -> [rexpr] -> state, [ty], [texpr]
+is state -> [expr name {}] -> state, [ty], [expr name ty]
 local typecheck-exprs state exprs =
   exprs |> list.fold (state, [], []) \state, tys, exprs expr.
     let state, ty, expr = typecheck-expr state expr
     state, list.append [ty] tys, list.append [expr] exprs
 
-is state -> rexpr -> state, ty, texpr
+is state -> expr name {} -> state, ty, expr name ty
 local typecheck-expr state expr =
   match expr
     :paren expr ->
@@ -479,6 +478,7 @@ local typecheck-expr state expr =
       state, :var var, :nat' {
         value: expr.value
         span:  expr.span
+        ty:    :var var
       }
 
     :str' expr ->
@@ -488,17 +488,18 @@ local typecheck-expr state expr =
       }
 
     :var expr ->
-      let state, name = name state expr.name
+      let state, ty = name-ty state expr.name
 
-      match name.kind
+      match expr.name.kind
         :global global ->
           let state, ty = match is-recursive state [] global
-            :true -> state, name.ty
-            :false -> instantiate state name.ty
+            :true -> state, ty
+            :false -> instantiate state ty
 
           state, ty, :var {
-            name: name
+            name: expr.name
             span: expr.span
+            ty:   ty
           }
 
         :import' ->
@@ -511,9 +512,10 @@ local typecheck-expr state expr =
           state, ty, :error expr.span
 
         _ ->
-          state, name.ty, :var {
-            name: name
+          state, ty, :var {
+            name: expr.name
             span: expr.span
+            ty:   ty
           }
 
     :field expr ->
@@ -559,6 +561,7 @@ local typecheck-expr state expr =
         input:  input
         fields: fields
         span:   expr.span
+        ty:     ty
       }
 
     :apply expr ->
@@ -781,6 +784,7 @@ local typecheck-expr state expr =
         op-span: expr.op-span
         rhs:     rhs
         span:    expr.span
+        ty:      lhs-ty
       }
 
     :block expr ->
@@ -1042,26 +1046,114 @@ local matrix-ty state col =
           state, :var var
         :false -> state, :union variants
 
-is state -> rename.name -> state, name
-name state name =
+is state -> name -> state, ty
+local name-ty state name =
   match map.get name.unique state.names
     :some name -> state, name
     :none ->
-      let state, var = add-var state (:some name.label) :none
+      let state, ty = match name.kind
+        :intrinsic intrinsic ->
+          intrinsic-ty state intrinsic
 
-      let name = {
-        unique: name.unique
-        label:  name.label
-        kind:   name.kind
-        span:   name.span
-        ty:     :var var
-      }
+        _ ->
+          let state, var = add-var state (:some name.label) :none
+          state, :var var
 
       let state = state with {
-        names: map.insert name.unique name state.names
+        names: map.insert name.unique ty state.names
       }
 
-      state, name
+      state, ty
+
+local intrinsic-ty state intrinsic =
+  let option ty = :union [
+    {
+      name:    "some"
+      payload: :some ty
+    }
+    {
+      name:    "none"
+      payload: :none
+    }
+  ]
+
+  match intrinsic
+    :dynamic ->
+      let state, input = add-inferred state
+      let state, var = add-var state :none :none
+
+      let ty = :union [
+        {
+          name:    "str'"
+          payload: :some :str'
+        }
+        {
+          name:    "nat'"
+          payload: :some :nat'
+        }
+        {
+          name:    "int'"
+          payload: :some :int'
+        }
+        {
+          name:    "real'"
+          payload: :some :real'
+        }
+        {
+          name:    "lambda"
+          payload: :none
+        }
+        {
+          name:    "action"
+          payload: :none
+        }
+        {
+          name:    "list"
+          payload: :some :list :var var
+        }
+        {
+          name:    "tuple"
+          payload: :some :list :var var
+        }
+        {
+          name:    "record"
+          payload: :some :list :tuple [:str'; :var var]
+        }
+        {
+          name:    "variant"
+          payload: :some :tuple [:str'; option (:var var)]
+        }
+      ]
+
+      let state = substitute state var ty
+
+      state, :lambda (input, ty)
+
+    :trace ->
+      let state, ty = add-inferred state
+      state, :lambda (:tuple [:str'; ty], ty)
+
+    :panic ->
+      let state, ty = add-inferred state
+      state, :lambda (:str', ty)
+
+    :nat-format -> state, :lambda (:nat', :str')
+    :nat-hash   -> state, :lambda (:nat', :nat')
+    :nat-xor    -> state, :lambda (:tuple [:nat'; :nat'], :nat')
+
+    :int-format -> state, :lambda (:int', :str')
+    :int-hash   -> state, :lambda (:int', :nat')
+
+    :real-format -> state, :lambda (:real', :str')
+    :real-hash   -> state, :lambda (:real', :nat')
+
+    :str-hash     -> state, :lambda (:str', :nat')
+    :str-length   -> state, :lambda (:str', :nat')
+    :str-prepend  -> state, :lambda (:tuple [:str'; :str'], :str')
+    :str-split-at -> state, :lambda (:tuple [:str'; :nat'], :tuple [:str'; :str'])
+    :str-find     -> state, :lambda (:tuple [:str'; :str'], option :nat')
+
+    _ -> state, :nat'
 
 is state -> ty -> state, ty
 local instantiate state ty =
@@ -1131,7 +1223,7 @@ local instantiate-with state vars ty =
 
       let state, vars, body = instantiate-with state vars alias.body
 
-      state, vars, :alias {
+      state, vars, :alias alias with {
         params: alias.params
         body:   body
       }
@@ -1311,10 +1403,16 @@ local normalize state ty =
             |> assert-some ""
 
           let vars = map.insert param.index input map.empty
+
+          let vars = params
+            |> list.fold vars \vars param.
+              map.insert param.index (:var param) vars
+
           let state, _, body = instantiate-with state vars alias.body
 
-          let alias = :alias {
+          let alias = :alias alias with {
             params: params
+            inputs: list.append [input] alias.inputs
             body:   body
           }
 
@@ -1480,7 +1578,124 @@ local unify-variant state ty variant prov side =
 
 is state -> ty -> str
 local format state ty =
-  string.format ty
+  let info = enumerate-vars state ty set.empty map.empty 
+
+  let bounds = map.values info
+    |> list.filter-map \i.
+      let bound = bound state i.var
+      format-bound-with-info state bound info
+    |> string.join " and "
+
+  let ty = format-with-info state ty info 0
+
+  match string.is-empty bounds
+    :true -> ty
+    :false -> ty
+      |> string.append " where "
+      |> string.append bounds
+
+local format-bound-with-info state bound info =
+  match bound
+    :numeric numeric -> :some format-numeric numeric
+    :record record -> :some "{...}"
+    :union union -> :some "|...|"
+    :subst subst -> :some format-with-info state subst info 0
+    :none -> :none
+
+is state -> ty -> map nat var-info -> nat -> str
+local format-with-info state ty info p =
+  let paren p' s =
+    match p > p'
+      :true -> s |> string.prepend "(" |> string.append ")"
+      :false -> s
+
+  let union variants =
+    variants
+      |> list.map \variant.
+        let name = variant.name
+          |> string.prepend ":"
+
+        match variant.payload
+          :some payload ->
+            format-with-info state payload info 4
+              |> string.prepend " "
+              |> string.prepend name
+          :none -> name
+      |> string.join " | "
+      |> paren 3
+
+  let record fields =
+    let fields = fields
+      |> list.map \field.
+        format-with-info state field.ty info 0
+          |> string.prepend ": "
+          |> string.prepend field.name
+      |> string.join "; "
+
+    match string.is-empty fields
+      :true -> "{}"
+      :false ->
+        fields
+          |> string.prepend "{ "
+          |> string.append " }"
+
+  match ty
+    :str' -> "str"
+    :nat' -> "nat"
+    :int' -> "int"
+    :real' -> "real"
+
+    :var var ->
+      match map.get var.index info
+        :some info -> info.name
+        :none -> match bound state var
+          :subst ty -> format-with-info state ty info p
+          _ -> "_"
+
+    :list ty ->
+      format-with-info state ty info 0
+        |> string.prepend "["
+        |> string.append "]"
+
+    :action ty ->
+      format-with-info state ty info 2
+        |> string.prepend "!"
+        |> paren 1
+
+    :lambda (input, output) ->
+      let input = format-with-info state input info 1
+      let output = format-with-info state output info 0
+
+      input
+        |> string.append " -> "
+        |> string.append output
+        |> paren 0
+
+    :apply (lambda, input) ->
+      let lambda = format-with-info state lambda info 5
+      let input = format-with-info state input info 6
+
+      lambda
+        |> string.append " "
+        |> string.append input
+        |> paren 5
+
+    :field (input, name) ->
+      format-with-info state input info 7
+        |> string.append "."
+        |> string.append name
+
+    :alias alias -> alias.name
+
+    :tuple fields ->
+      fields
+        |> list.map \field. format-with-info state field info 3
+        |> string.join ", "
+        |> paren 2
+
+    :record fields -> record fields
+
+    :union variants -> union variants
 
 is numeric -> str
 local format-numeric numeric =
@@ -1488,6 +1703,104 @@ local format-numeric numeric =
     :nat' -> "natural"
     :int' -> "integer"
     :real' -> "number"
+
+local type var-info = {
+  is-recursive: bool
+  occurences: nat
+  name: str
+  var: var
+}
+
+is state -> ty -> set nat -> map nat var-info -> map nat var-info
+local enumerate-vars state ty seen info =
+  match ty
+    :str' -> info
+    :nat' -> info
+    :int' -> info
+    :real' -> info
+
+    :var var -> match set.has var.index seen
+      :true ->
+        let n = map.count info
+        let i = map.get var.index info
+          |> some-or (var-info var n)
+
+        let i = i with { is-recursive: :true }
+        map.insert var.index i info
+
+      :false ->
+        let seen = set.insert var.index seen
+        let bound = bound state var
+
+        match bound
+          :subst subst -> enumerate-vars state subst seen info
+          bound ->
+            let n = map.count info
+            let i = map.get var.index info
+              |> some-or (var-info var n)
+
+            let i = i with { occurences: i.occurences + 1 }
+            let info = map.insert var.index i info
+
+            match bound
+              :numeric _ -> info
+              :subst _ -> info
+              :none -> info
+
+              :record fields ->
+                fields |> list.fold info \info field.
+                  enumerate-vars state field.ty seen info
+
+              :union variants ->
+                variants |> list.fold info \info variant.
+                  match variant.payload
+                    :some payload -> enumerate-vars state payload seen info
+                    :none -> info
+
+    :list item -> enumerate-vars state item seen info
+
+    :action output -> enumerate-vars state output seen info
+
+    :lambda (input, output) ->
+      enumerate-vars state input seen info
+        |> enumerate-vars state output seen
+
+    :apply (lambda, input) ->
+      enumerate-vars state lambda seen info
+        |> enumerate-vars state input seen
+    
+    :field (input, _) -> enumerate-vars state input seen info
+
+    :alias _ -> info
+
+    :tuple fields ->
+      fields |> list.fold info \info field.
+        enumerate-vars state field seen info
+
+    :record fields ->
+      fields |> list.fold info \info field.
+        enumerate-vars state field.ty seen info
+
+    :union variants ->
+      variants |> list.fold info \info variant.
+        match variant.payload
+          :some payload -> enumerate-vars state payload seen info
+          :none -> info
+
+local var-info var n = {
+  is-recursive: :false
+  occurences: 0
+  name: var-name n
+  var: var
+}
+
+local var-name n =
+  let letters = "abcdefghijklmnopqrstuvwxyz"
+
+  string.graphemes letters
+    |> list.nth n
+    |> some-or "_"
+    |> string.prepend "'"
 
 is provenance -> diagnostic -> diagnostic
 local explain prov diagnostic =

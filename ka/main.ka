@@ -11,11 +11,18 @@ import "ka:parse/parser"
 import "ka:diagnostic/format"
 import "ka:phase/rename"
 import "ka:phase/typecheck"
+import "ka:phase/lower"
+import "ka:phase/simplify"
 import "ka:parse"
+import "ka:ir"
 
 main = do
   let result <- compiler
     |> add-package "test" "test"
+
+  let result <- result
+    |> try-then \compiler.
+      add-package "std" "std2" compiler
 
   match result
     :ok compiler -> compile compiler
@@ -30,10 +37,22 @@ compile compiler = do
   let renamed, ds' = rename compiler.files
   let ds = append ds' compiler.diagnostics
 
+  println "renamed"
+
   let typechecked, ds' = typecheck renamed
   let ds = append ds' ds
 
+  println "type checked"
+
   print-all ds
+
+  let ir = lower typechecked
+  let ir = simplify ir
+
+  println ""
+  println "== SIMPLIFIED =="
+  println ""
+  println (format ir)
 
   do {}
 
@@ -77,11 +96,12 @@ add-package-file parent path compiler =
           path: path
         }
 
+        let name = string.append name parent
+        println name
+
         let ts, ds = lex file input
         let ast, ds' = parse ts module
           |> assert-some "parsing never fails"
-
-        let name = string.append name parent
 
         let compiler = compiler with {
           files: (name, ast) :: compiler.files 

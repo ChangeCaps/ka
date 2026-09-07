@@ -184,7 +184,7 @@ ty-apply =
     |> map \ty, args, span.
       args |> list.fold ty \lambda input.
         :apply {
-          lambda: ty
+          lambda: lambda
           input:  input
           span:   span
         }
@@ -274,7 +274,7 @@ ty-generic = token :quote
     }
 
 ty-action = token :bang
-  |> thenr ty
+  |> thenr (expect-ty ty-rs (delay \_. ty-tuple))
   |> spanned
   |> map \ty, span.
     :action {
@@ -304,6 +304,7 @@ ty-record =
     |> then (token :indent)
     |> thenr (many1 (field |> thenl expect-newlines))
     |> thenl (expect :dedent)
+    |> thenl expect-newline
 
   token :open-brace
     |> thenr (else fields block)
@@ -321,7 +322,7 @@ expect-pat ts p =
     |> map \x, span.
       x |> some-or (:error span)
 
-is parser (pat str)
+is parser (pat str {})
 pat = delay \_. pat-tuple
 
 pat-tuple =
@@ -406,6 +407,7 @@ pat-bind = ident
   |> map \name, span.
     :bind {
       name: name
+      ty:   {}
       span: span
     }
 
@@ -464,7 +466,7 @@ expect-expr rs p =
     |> map \x, span.
       x |> some-or (:error span)
 
-is parser (expr str)
+is parser (expr str {})
 expr =
   delay \_.
     expr-block
@@ -595,7 +597,7 @@ expr-block =
   many1 (token :newline)
     |> then (token :indent)
     |> thenr (many0 stmt)
-    |> then expr
+    |> then (expect-expr [:newline] expr)
     |> thenl expect-newlines
     |> thenl (expect :dedent)
     |> map \stmts, output.
@@ -692,6 +694,7 @@ local expr-binary ops lhs =
           op-span: op-span
           rhs:     rhs
           span:    span
+          ty:      {}
         }
 
 expr-variant = token :colon
@@ -750,6 +753,7 @@ expr-with =
             input:  input
             fields: fields
             span:   span
+            ty:     {}
           }
 
 expr-unary =
@@ -809,6 +813,7 @@ expr-var = ident
     :var {
       name: name
       span: span
+      ty:   {}
     }
 
 expr-str' = string
@@ -825,6 +830,7 @@ expr-nat' = number
     :nat' {
       value: value
       span:  span
+      ty:    {}
     }
 
 expr-paren =

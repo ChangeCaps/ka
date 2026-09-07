@@ -1,0 +1,268 @@
+import "std:list"   as list
+import "std:map"    as map
+import "std:set"    as set
+import "std:debug"  as debug
+import "std:option" as option
+import "std:string" as string
+import "std:assert" as assert
+
+import "ka:ir"
+
+simplify program =
+  let env = {
+    vars: map.empty
+    subst: set.empty
+  }
+
+  let env = program
+    |> fold env \env var, expr.
+      match uses var expr > 0
+        :true -> remove-var var env
+        :false -> env
+
+  program |> list.map \var, expr.
+    var, simplify-expr env expr
+
+local type env = {
+  vars: map nat expr
+  subst: set (var, expr)
+}
+
+local add-var var expr env =
+  env with {
+    vars: map.insert var.id expr env.vars
+  }
+
+local remove-var var env =
+  env with {
+    vars: map.remove var.id env.vars
+  }
+
+local get-var var env =
+  map.get var.id env.vars
+
+local has-var var env =
+  map.has var.id env.vars
+
+local add-subst var expr env =
+  env with {
+    subst: set.insert (var, expr) env.subst
+  }
+
+local has-subst var expr env =
+  set.has (var, expr) env.subst
+
+is env -> expr -> expr
+local simplify-expr env expr =
+  match expr
+    :var var ->
+      get-var var env
+        |> some-or expr
+
+    :lit _ -> expr
+
+    :lam (var, output) ->
+      let output = simplify-expr env output
+      :lam (var, output)
+
+    :app (lambda, input) ->
+      let lambda = simplify-expr env lambda
+      let input = simplify-expr env input
+
+      match lambda
+        :lam (var, output) ->
+          let env = add-subst var input env
+          let env = add-var var input env
+          simplify-expr env output
+
+        _ -> :app (lambda, input)
+
+    :field (expr, field) ->
+      let expr = simplify-expr env expr
+
+      match expr
+        :cons cons ->
+          match cons, field
+            :tuple fields, :index n ->
+              nth n fields |> assert-some ""
+
+            _ -> :field (expr, field)
+        _ -> :field (expr, field)
+
+    :bind (input, var, output) ->
+      let uses = uses var output
+
+      match uses == 0
+        :true -> simplify-expr env output
+        :false ->
+          let input = simplify-expr env input
+
+          match uses == 1
+            :true ->
+              let env = add-var var input env
+              simplify-expr env output
+
+            :false ->
+              let output = simplify-expr env output
+              :bind (input, var, output)
+
+    :case (scrutinee, arms) ->
+      let scrutinee = simplify-expr env scrutinee
+
+      match scrutinee
+        :cons cons ->
+          arms
+            |> find-map \alt, expr.
+              match cons, alt
+                :variant (n, p), :variant (n', p') ->
+                  match n == n', p, p'
+                    :true, :some p, :some p' -> :some :bind (p, p', expr)
+                    :true, :none, :none -> :some expr
+                    _ -> :none
+
+                :cons (h, t), :cons (h', t') ->
+                  :some :bind (h, h', :bind (t, t', expr))
+
+                :empty, :empty -> :some expr
+
+                _, :default -> :some expr
+                _, _ -> :none
+            |> assert-some "cons should always match one arm"
+            |> simplify-expr env
+
+        _ ->
+          let arms = arms
+            |> map \alt, expr.
+              alt, simplify-expr env expr
+
+          :case (scrutinee, arms)
+
+    :cons cons ->
+      let cons = match cons
+        :empty -> :empty
+
+        :cons (head, tail) ->
+          let head = simplify-expr env head
+          let tail = simplify-expr env tail
+          :cons (head, tail)
+
+        :variant (name, payload) ->
+          let payload = payload
+            |> map-some (simplify-expr env)
+
+          :variant (name, payload)
+
+        :record (from, fields) ->
+          let from = from
+            |> map-some (simplify-expr env)
+
+          let fields = fields
+            |> map \name, expr.
+              name, simplify-expr env expr
+
+          :record (from, fields)
+
+        :tuple fields ->
+          let fields = fields
+            |> map (simplify-expr env)
+
+          :tuple fields
+
+      :cons cons
+
+    :prim prim ->
+      match prim
+        :unary (op, expr) ->
+          let expr = simplify-expr env expr
+          :prim :unary (op, expr)
+
+        :binary (op, lhs, rhs) ->
+          let lhs = simplify-expr env lhs
+          let rhs = simplify-expr env rhs
+
+          match lhs, rhs
+            :lit lhs, :lit rhs ->
+              let lit = match op, lhs, rhs
+                :add _, :nat' lhs, :nat' rhs -> :nat' (lhs + rhs)
+                :add _, :int' lhs, :int' rhs -> :int' (lhs + rhs)
+                :add _, :real' lhs, :real' rhs -> :real' (lhs + rhs)
+
+                :sub _, :nat' lhs, :nat' rhs -> :nat' (lhs - rhs)
+                :sub _, :int' lhs, :int' rhs -> :int' (lhs - rhs)
+                :sub _, :real' lhs, :real' rhs -> :real' (lhs - rhs)
+
+                :mul _, :nat' lhs, :nat' rhs -> :nat' (lhs * rhs)
+                :mul _, :int' lhs, :int' rhs -> :int' (lhs * rhs)
+                :mul _, :real' lhs, :real' rhs -> :real' (lhs * rhs)
+
+                :div _, :real' lhs, :real' rhs -> :real' (lhs / rhs)
+
+                _ -> panic ""
+
+              :lit lit
+
+            _, _ -> :prim :binary (op, lhs, rhs)
+
+        :action action ->
+          match action
+            :pure expr ->
+              :prim :action :pure simplify-expr env expr
+
+            :bind (a, b) ->
+              let a = simplify-expr env a
+              let b = simplify-expr env b
+              :prim :action :bind (a, b)
+
+is var -> expr -> nat
+local uses var expr =
+  match expr
+    :var var' ->
+      match var' == var
+        :true -> 1
+        :false -> 0
+
+    :lit _ -> 0
+
+    :lam (_, output) -> uses var output
+
+    :app (lambda, input) -> uses var lambda + uses var input
+
+    :field (expr, _) -> uses var expr
+
+    :bind (input, _, output) -> uses var input + uses var output
+
+    :case (scrutinee, arms) ->
+      let n = uses var scrutinee
+
+      arms |> fold n \n _, expr.
+        n + uses var expr
+
+    :cons cons ->
+      match cons
+        :empty -> 0
+
+        :cons (head, tail) -> uses var head + uses var tail
+
+        :variant (_, :some payload) -> uses var payload
+        :variant (_, :none) -> 0
+
+        :record (from, fields) ->
+          let n = from
+            |> map-some (uses var)
+            |> some-or 0
+
+          fields |> fold n \n _, expr.
+            n + uses var expr
+
+        :tuple fields ->
+          fields |> fold 0 \n expr.
+            n + uses var expr
+
+    :prim prim ->
+      match prim
+        :unary (op, expr) -> uses var expr
+        :binary (op, lhs, rhs) -> uses var lhs + uses var rhs
+        :action action ->
+          match action
+            :pure expr -> uses var expr
+            :bind (a, b) -> uses var a + uses var b

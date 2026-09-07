@@ -1,0 +1,7 @@
+min a b = match a < b
+  :true  -> a
+  :false -> b
+
+max a b = match a > b
+  :true  -> a
+  :false -> b

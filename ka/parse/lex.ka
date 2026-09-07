@@ -199,18 +199,17 @@ local token-string state =
     :false -> :none
     :true ->
       let state = advance 1 state
-      let s = state.remaining
+      let n, s = state.remaining
         |> take-string
 
-      let n = length s + 1
       :some (advance n state, :string s)
 
 local take-string s =
   match pop s
-    :some ("\"", s) -> ""
+    :some ("\"", s) -> 1, ""
     :some ("\\", s) ->
       match pop s
-        :none -> ""
+        :none -> 0, ""
         :some (c, s) -> 
           let escape = match c
             "\\" -> :some "\\"
@@ -223,17 +222,17 @@ local take-string s =
 
           match escape
             :some e ->
-              take-string s
-                |> prepend e
+              let n, s = take-string s
+              n + 2, prepend e s
 
             :none ->
               take-string s
 
     :some (c, s) ->
-      take-string s
-        |> prepend c
+      let n, s = take-string s
+      n + 1, prepend c s
 
-    :none -> ""
+    :none -> 0, ""
 
 local token-symbol state =
   let n2, _ = split-at 2 state.remaining

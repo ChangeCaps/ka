@@ -1,0 +1,19 @@
+import "std:list"
+import "std:option"
+
+import "intrinsic" as intrinsic
+
+type dynamic =
+  | :lambda
+  | :action
+  | :nat' nat
+  | :int' int
+  | :real' real
+  | :str' str
+  | :list [dynamic]
+  | :tuple [dynamic]
+  | :record [str, dynamic]
+  | :variant (str, option dynamic)
+
+is 'a -> dynamic
+dynamic x = intrinsic.dynamic x

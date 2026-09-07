@@ -1,0 +1,525 @@
+import "std:assert"
+import "std:option" as option
+import "std:string" as string
+import "std:debug"  as debug
+import "std:list"   as list
+import "std:map"    as map
+
+import "ka:phase/typecheck" as typecheck
+import "ka:ast"             as ast
+import "ka:ir"              as ir
+
+lower program =
+  let state = {
+    next-id: 0
+    bounds: program.bounds
+  }
+
+  let env = {
+    vars: map.empty
+  }
+
+  let state, env, globals = program.globals
+    |> list.fold (state, env, []) \state, env, globals global.
+      let state, var = add-var state (pat-name global.pat)
+      let state, env = lower-pat state env global.pat (:var var)
+      state, env, (var, global) :: globals
+
+  let state, binds = globals
+    |> list.fold (state, []) \state, binds var, global.
+      let lambda = :lambda {
+        params: global.params
+        output: global.output
+        span:   global.span
+      }
+
+      let state, expr = lower-expr state env lambda
+      state, (var, expr) :: binds
+
+  binds |> trace (format binds)
+
+local type state = {
+  next-id: nat
+  bounds: map nat bound
+}
+
+local type env = {
+  vars: map nat expr
+}
+
+local lower-expr state env expr =
+  match expr
+    :paren expr -> lower-expr state env expr.expr
+
+    :nat' expr ->
+      let value = parse-nat expr.value
+
+      let lit = match number-type state expr.ty
+        :nat' -> :nat' nat value
+        :int' -> :int' int value
+        :real' -> :real' real value
+
+      state, :lit lit
+
+    :str' expr ->
+      state, :lit :str' expr.value
+
+    :var expr ->
+      match expr.name.kind
+        :intrinsic intrinsic ->
+          let unary op =
+            let state, var = add-var state :none
+            state, :lam (var, :prim :unary (op, :var var))
+
+          let binary op =
+            let state, var = add-var state :none
+            let fst = :field (:var var, :index 0)
+            let snd = :field (:var var, :index 1)
+            state, :lam (var, :prim :binary (op, fst, snd))
+
+          match intrinsic
+            :dynamic -> unary :dynamic
+            :trace -> binary :trace
+            :panic -> unary :panic
+
+            :nat-format -> unary (:num-to-str :nat')
+            :nat-xor -> binary (:nat-xor)
+            :nat-hash -> unary (:num-hash :nat')
+
+            :int-format -> unary (:num-to-str :int')
+            :int-hash -> unary (:num-hash :int')
+
+            :real-format -> unary (:num-to-str :real')
+            :real-hash -> unary (:num-hash :real')
+
+            :str-hash -> unary :str-hash
+            :str-length -> unary :str-length
+            :str-prepend -> binary :str-prepend
+            :str-split-at -> binary :str-split-at
+            :str-find -> binary :str-find
+        _ ->
+          let var = map.get expr.name.unique env.vars
+            |> assert-some "vars are always registered"
+
+          state, var
+
+    :field expr ->
+      let state, input = lower-expr state env expr.input
+      state, :field (input, :name expr.name)
+
+    :with' expr ->
+      let state, input = lower-expr state env expr.input
+
+      let state, fields = expr.fields
+        |> list.fold (state, []) \state, fields field.
+          let state, expr = lower-expr state env field.expr
+          state, (field.name, expr) :: fields
+
+      state, :cons :record (:some input, fields)
+
+    :apply expr ->
+      let state, lambda = lower-expr state env expr.lambda
+      let state, input = lower-expr state env expr.input
+      state, :app (lambda, input)
+
+    :pipe expr ->
+      let state, lambda = lower-expr state env expr.lambda
+      let state, input = lower-expr state env expr.input
+      state, :app (lambda, input)
+
+    :lambda expr ->
+      match expr.params
+        param :: params ->
+          let lambda = :lambda expr with { params: params }
+
+          let state, var = add-var state (pat-name param)
+          let state, expr = lower-case state env [:var var] [[param], lambda]
+          state, :lam (var, expr)
+
+        [] -> lower-expr state env expr.output
+
+    :list expr ->
+      expr.items |> list.rfold (state, :cons :empty) \state, tail item.
+        let state, item = lower-expr state env item
+        state, :cons :cons (item, tail)
+
+    :variant expr ->
+      let state, payload = match expr.payload
+        :some payload ->
+          let state, payload = lower-expr state env payload
+          state, :some payload
+        :none -> state, :none
+
+      state, :cons :variant (expr.name, payload)
+
+    :record expr ->
+      let state, fields = expr.fields
+        |> list.rfold (state, []) \state, fields field.
+          let state, expr = lower-expr state env field.expr
+          state, (field.name, expr) :: fields
+
+      state, :cons :record (:none, fields)
+
+    :tuple expr ->
+      let state, fields = expr.fields
+        |> list.rfold (state, []) \state, fields field.
+          let state, field = lower-expr state env field
+          state, field :: fields
+
+      state, :cons :tuple fields
+
+    :unary expr ->
+      let state, input = lower-expr state env expr.input
+
+      match expr.op
+        :not ->
+          let alts = [
+            :variant ("true", :none), :cons :variant ("false", :none)
+            :variant ("false", :none), :cons :variant ("true", :none)
+          ]
+
+          state, :case (input, alts)
+        op -> panic (string.format op)
+
+    :binary expr ->
+      let state, lhs = lower-expr state env expr.lhs
+      let state, rhs = lower-expr state env expr.rhs
+
+      let expr = match expr.op
+        :add ->
+          let binary = :add number-type state expr.ty
+          :prim :binary (binary, lhs, rhs)
+
+        :sub ->
+          let binary = :sub number-type state expr.ty
+          :prim :binary (binary, lhs, rhs)
+
+        :mul ->
+          let binary = :mul number-type state expr.ty
+          :prim :binary (binary, lhs, rhs)
+
+        :div ->
+          let binary = :div number-type state expr.ty
+          :prim :binary (binary, lhs, rhs)
+
+        :gt ->
+          let binary = :gt number-type state expr.ty
+          :prim :binary (binary, lhs, rhs)
+
+        :lt ->
+          let binary = :lt number-type state expr.ty
+          :prim :binary (binary, lhs, rhs)
+
+        :ge ->
+          let binary = :ge number-type state expr.ty
+          :prim :binary (binary, lhs, rhs)
+
+        :le ->
+          let binary = :le number-type state expr.ty
+          :prim :binary (binary, lhs, rhs)
+
+        :land -> :prim :binary (:land, lhs, rhs)
+        :lor -> :prim :binary (:lor, lhs, rhs)
+
+        :eq -> :prim :binary (:eq, lhs, rhs)
+        :ne -> :prim :binary (:ne, lhs, rhs)
+
+        :cons -> :cons :cons (lhs, rhs)
+
+        op -> panic (string.format op)
+
+      state, expr
+
+    :block expr ->
+      match expr.stmts
+        stmt :: stmts ->
+          let block = :block expr with { stmts: stmts }
+          lower-let state env stmt block
+        [] -> lower-expr state env expr.output
+
+    :do' expr ->
+      let state, expr = lower-expr state env expr.expr
+      state, :prim :action :pure expr
+
+    :do-block expr ->
+      match expr.stmts
+        stmt :: stmts ->
+          let block = :do-block expr with { stmts: stmts }
+
+          match stmt
+            :let' stmt -> lower-let state env stmt block
+            :bind stmt -> lower-bind state env stmt block
+            :expr expr ->
+              let state, expr = lower-expr state env expr
+
+              match stmts
+                [] -> state, expr
+                _ ->
+                  let state, var = add-var state :none
+                  let state, block = lower-expr state env block
+                  state, :prim :action :bind (expr, :lam (var, block))
+
+        [] -> state, :cons :record (:none, [])
+
+    :match' expr ->
+      let state, input = lower-expr state env expr.input
+
+      let arms = expr.arms
+        |> list.map \arm. [arm.pat], arm.expr
+
+      lower-case state env [input] arms
+
+    _ -> panic (string.format expr)
+
+local lower-let state env stmt output =
+  let lambda = :lambda {
+    params: stmt.params
+    output: stmt.input
+    span:   stmt.span
+  }
+
+  let state, input = lower-expr state env lambda
+
+  let state, var = add-var state :none
+  let state, expr = lower-case state env [:var var] [[stmt.pat], output]
+
+  state, :bind (input, var, expr)
+
+local lower-bind state env stmt output =
+  let state, var = add-var state :none
+  let state, input = lower-expr state env stmt.input
+  let state, expr = lower-case state env [:var var] [[stmt.pat], output]
+
+  state, :prim :action :bind (input, :lam (var, expr))
+
+local lower-pat state env pat expr =
+  match pat
+    :wild _ -> state, env
+
+    :bind pat ->
+      state, env with {
+        vars: map.insert pat.name.unique expr env.vars
+      }
+
+    _ -> panic (string.format pat)
+
+local pat-name pat =
+  match pat
+    :bind pat -> :some pat.name.label
+    _ -> :none
+
+local lower-case state env scrutinees arms =
+  let arms = arms
+    |> list.map \pats, expr.
+      let pats = pats
+        |> list.map \pat.
+          match pat
+            :paren pat -> pat.pat
+            _ -> pat
+
+      pats, expr
+
+  let first = list.first arms
+    |> assert-some "must always have at least one arm"
+
+  let pop pats =
+    list.pop pats
+      |> assert-some "arms aren't empty"
+
+  match first
+    [], expr -> lower-expr state env expr
+    pat :: _, _ ->
+      let pat = arms
+        |> list.find-map \pats, expr.
+          let pat = list.first pats
+            |> assert-some "pats isn't empty"
+
+          match pat
+            :wild _ -> :none
+            :bind _ -> :none
+            _ -> :some pat
+        |> some-or pat
+
+      let scrutinee, scrutinees = list.pop scrutinees
+        |> assert-some "must always have at least one scrutinee"
+
+      let list arms =
+        let cons, empty, wild = arms
+          |> list.rfold ([], [], []) \cons, empty, wild pats, expr.
+            let head, tail = pop pats
+
+            match head
+              :cons pat ->
+                let cons = (pat.first :: pat.rest :: tail, expr) :: cons
+                cons, empty, wild
+
+              :empty _ ->
+                let empty = (tail, expr) :: empty
+                cons, empty, wild
+
+              :bind _ -> cons, empty, (pats, expr) :: wild
+              :wild _ -> cons, empty, (pats, expr) :: wild
+
+              _ -> panic (string.format head)
+
+        let state, alts = match wild
+          [] -> state, []
+          _ ->
+            let state, var = add-var state :none
+
+            let scrutinees = scrutinee :: scrutinees
+            let state, expr = lower-case state env scrutinees wild
+
+            state, [(:default, expr)]
+
+        let state, alts = match empty
+          [] -> state, alts
+          _ ->
+            let state, expr = lower-case state env scrutinees empty
+
+            state, (:empty, expr) :: alts
+
+        let state, alts = match cons
+          [] -> state, alts
+          _ ->
+            let state, head = add-var state :none
+            let state, tail = add-var state :none
+
+            let scrutinees = :var head :: :var tail :: scrutinees
+            let state, expr = lower-case state env scrutinees cons
+
+            state, (:cons (head, tail), expr) :: alts
+
+        state, :case (scrutinee, alts)
+
+      let bind arms =
+        let env, arms = arms
+          |> list.rfold (env, []) \env, arms pats, expr.
+            let head, tail = list.pop pats
+              |> assert-some "arms aren't empty"
+
+            let env = match head
+              :wild _   -> env
+              :bind pat ->
+                env with {
+                  vars: map.insert pat.name.unique scrutinee env.vars
+                }
+              _ -> panic (string.format head)
+
+            env, (tail, expr) :: arms 
+
+        lower-case state env scrutinees arms
+
+      match pat
+        :tuple pat ->
+          let arity = list.count pat.fields
+
+          let scrutinees = list.range 0 arity
+            |> list.map \n. :field (scrutinee, :index n)
+            |> list.append scrutinees
+
+          let arms = arms
+            |> list.map \pats, expr.
+              let head, tail = list.pop pats
+                |> assert-some "arms aren't empty"
+
+              let pats = match head
+                :tuple pat -> pat.fields
+                _ -> panic (string.format head)
+
+              list.prepend pats tail, expr
+
+          lower-case state env scrutinees arms
+
+        :empty _ -> list arms
+        :cons _ -> list arms
+
+        :variant _ ->
+          let variants, wild = arms
+            |> list.rfold (map.empty, []) \variants, wild pats, expr.
+              let head, tail = pop pats
+
+              match head
+                :variant variant ->
+                  let tail = match variant.payload
+                    :some payload -> payload :: tail
+                    :none -> tail
+
+                  let payload, arms = map.get variant.name variants
+                    |> some-or (is-some variant.payload, [])
+
+                  let arms = (tail, expr) :: arms
+
+                  map.insert variant.name (payload, arms) variants, wild
+
+                :wild _ -> variants, (pats, expr) :: wild
+                :bind _ -> variants, (pats, expr) :: wild
+
+                _ -> panic (string.format head)
+
+          let state, alts = match wild
+            [] -> state, []
+            _ ->
+              let state, var = add-var state :none
+              let scrutinees = scrutinee :: scrutinees
+              let state, expr = lower-case state env scrutinees wild
+              state, [(:default, expr)]
+
+          let state, alts = variants
+            |> map.list
+            |> list.rfold (state, alts) \state, alts name, (payload, arms).
+              let state, scrutinees, payload = match payload
+                :true ->
+                  let state, var = add-var state :none
+                  state, :var var :: scrutinees, :some var
+                :false -> state, scrutinees, :none
+
+              let state, expr = lower-case state env scrutinees arms
+              state, (:variant (name, payload), expr) :: alts
+
+          state, :case (scrutinee, alts)
+
+        :bind _ -> bind arms
+        :wild _ -> bind arms
+
+        _ -> panic (string.format pat)
+
+is state -> option str -> state, var
+local add-var state name =
+  let state, id = add-id state
+  state, {
+    name: match name
+      :some name -> name
+      :none -> string.prepend "_" (string.format id)
+    id: id
+  }
+
+is state -> state, nat
+local add-id state =
+  state with { next-id: state.next-id + 1 }, state.next-id
+
+local parse-nat s =
+  let digits = "0123456789"
+
+  string.graphemes s
+    |> list.fold 0 \n c.
+      let digit = string.find c digits
+        |> some-or 0
+
+      n * 10 + digit
+
+local number-type state ty =
+  match ty
+    :var var -> match map.get var.index state.bounds
+      :some :numeric :nat' -> :nat'
+      :some :numeric :int' -> :int'
+      :some :numeric :real' -> :real'
+      :some :subst ty -> number-type state ty
+
+      bound -> panic (string.format bound)
+
+    :nat' -> :nat'
+    :int' -> :int'
+    :real' -> :real'
+
+    _ -> panic (string.format ty)

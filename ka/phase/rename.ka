@@ -22,30 +22,52 @@ type name = {
   unique: unique
   label:  str
   kind:   kind
-  span:   span
+  span:   option span
 }
 
 type alias = {
   name:   name
   params: [name]
-  ty:     ty name
+  ty:     ty name 
   span:   span
 }
 
 type global = {
   unique: unique
   ty:     option (ty name)
-  pat:    pat name
-  params: [pat name]
-  output: expr name
+  pat:    pat name {}
+  params: [pat name {}]
+  output: expr name {}
   span:   span
 }
+
+type intrinsic =
+  | :dynamic
+  | :trace
+  | :panic
+
+  | :nat-format
+  | :nat-hash
+  | :nat-xor
+
+  | :int-format
+  | :int-hash
+
+  | :real-format
+  | :real-hash
+
+  | :str-hash
+  | :str-length
+  | :str-prepend
+  | :str-split-at
+  | :str-find
 
 type kind =
   | :type'
   | :local'
   | :import'
   | :generic
+  | :intrinsic intrinsic
   | :global unique
 
 is [str, [module-def]] -> renamed, [diagnostic]
@@ -62,6 +84,8 @@ rename modules =
     diagnostics: []
   }
 
+  let state = add-intrinsic state
+
   let state, modules = modules
     |> list.fold (state, []) \state, modules name, defs.
       let state, unique = add-import name state
@@ -76,12 +100,23 @@ rename modules =
         variables: map.empty
       }
 
-      let env, state, globals, types = defs
-        |> list.fold (env, state, [], []) partial-def
+      let env = prelude
+        |> list.fold env \env path, name.
+          let module = map.get path state.imports
+            |> assert-some "std modules should exist"
 
-      let state = state with {
-        modules: map.insert unique env state.modules
-      }
+          let name = {
+            unique: module
+            label:  name
+            kind:   :import'
+            span:   :none
+          }
+
+          env with {
+            imports: module :: env.imports
+            types: map.insert name.label name env.types
+            variables: map.insert name.label name env.variables
+          }
 
       let env, state = defs
         |> list.fold (env, state) \env, state def.
@@ -89,8 +124,33 @@ rename modules =
             :import' def -> partial-import env state def
             _ -> env, state
 
+      let env, state, globals, types = defs
+        |> list.fold (env, state, [], []) partial-def
+
+      let module = map.list env.types
+        |> list.fold env \env label, name.
+          match name.kind
+            :import' ->
+              env with {
+                types: map.remove label env.types
+              }
+            _ -> env
+
+      let module = map.list env.variables
+        |> list.fold module \env label, name.
+          match name.kind
+            :import' ->
+              env with {
+                variables: map.remove label env.variables
+              }
+            _ -> env
+
+      let state = state with {
+        modules: map.insert unique module state.modules
+      }
+
       state, (unique, env, globals, types) :: modules
-  
+
   let state = modules
     |> list.fold state \state unique, env, globals, types.
       let state = types
@@ -127,6 +187,64 @@ local type state = {
   next-unique: nat
   diagnostics: [diagnostic]
 }
+
+is state -> state
+local add-intrinsic state =
+  let state, variables = intrinsics
+    |> list.fold (state, map.empty) \state, variables name, intrinsic.
+      let state, unique = add-unique state
+
+      let name = {
+        unique: unique
+        label:  name
+        kind:   :intrinsic intrinsic
+        span:   :none
+      }
+
+      state, map.insert name.label name variables
+
+  let env = {
+    this:      0
+    imports:   []
+    types:     map.empty
+    variables: variables
+  }
+
+  let state, unique = add-unique state
+
+  state with {
+    imports: map.insert "intrinsic" unique state.imports
+    modules: map.insert unique env state.modules
+  }
+
+local prelude = [
+  "std:bool", "bool"
+  "std:list", "list"
+  "std:option", "option"
+  "std:hash", "hash"
+]
+
+local intrinsics = [
+  "dynamic", :dynamic
+  "trace",   :trace
+  "panic",   :panic
+
+  "nat-format", :nat-format
+  "nat-hash",   :nat-hash
+  "nat-xor",    :nat-xor
+
+  "int-format", :int-format
+  "int-hash",   :int-hash
+
+  "real-format", :real-format
+  "real-hash",   :real-hash
+
+  "str-hash",     :str-hash
+  "str-length",   :str-length
+  "str-prepend",  :str-prepend
+  "str-split-at", :str-split-at
+  "str-find",     :str-find
+]
 
 local add-unique state =
   let unique = state.next-unique
@@ -178,10 +296,10 @@ local partial-import env state def =
         :none -> env
         :some label ->
           let name = {
-            kind:   :import'
             unique: unique
             label:  label
-            span:   def.span
+            kind:   :import'
+            span:   :some def.span
           }
 
           env with {
@@ -208,7 +326,7 @@ local partial-type env state def =
     unique: unique
     label:  def.name
     kind:   :type'
-    span:   def.span
+    span:   :some def.span
   }
 
   let state, params = def.params
@@ -220,7 +338,7 @@ local partial-type env state def =
         unique: unique
         label:  name
         kind:   :generic
-        span:   def.span
+        span:   :none
       }
 
       state, list.append [name] params
@@ -297,27 +415,28 @@ local rename-global env state partial =
     globals: map.insert global.unique global state.globals
   }
 
-is env -> state -> [pat str] -> kind -> env, state, [pat name]
+is env -> state -> [pat str {}] -> kind -> env, state, [pat name {}]
 local rename-pats env state pats kind =
   pats |> list.fold (env, state, []) \env, state, pats pat.
     let env, state, pat = rename-pat env state pat kind
     env, state, list.append [pat] pats
 
-is env -> state -> pat str -> kind -> env, state, pat name
+is env -> state -> pat str {} -> kind -> env, state, pat name {}
 local rename-pat env state pat kind =
   match pat
     :bind pat ->
       let state = match kind
         :global _ -> match map.get pat.name env.variables
-          :some name ->
-            "duplicate variable `"
-              |> string.append pat.name
-              |> string.append "`"
-              |> error
-              |> label name.span "previously found here"
-              |> label pat.span "found here"
-              |> add-diagnostic state
           :none -> state
+          :some name -> match name.kind
+            :import' -> state
+            _ ->
+              "duplicate variable `"
+                |> string.append pat.name
+                |> string.append "`"
+                |> error
+                |> label pat.span "found here"
+                |> add-diagnostic state
         _ -> state
 
       let state, unique = add-unique state
@@ -326,7 +445,7 @@ local rename-pat env state pat kind =
         unique: unique
         label:  pat.name
         kind:   kind
-        span:   pat.span
+        span:   :some pat.span
       }
 
       let env = env with {
@@ -336,6 +455,7 @@ local rename-pat env state pat kind =
       let pat = :bind {
         name: name
         span: pat.span
+        ty:   {}
       }
 
       env, state, pat
@@ -482,7 +602,7 @@ local rename-ty env state ty =
             unique: unique
             label:  name
             kind:   :generic
-            span:   ty.span
+            span:   :some ty.span
           }
 
           let env = env with {
@@ -535,7 +655,7 @@ local rename-ty env state ty =
 
     :field ty ->
       match get-ty-module env state ty.input
-        :some (env, name) -> match map.get ty.name env.types
+        :some (module, name) -> match map.get ty.name module.types
           :some name ->
             env, state, :var {
               name: name
@@ -553,6 +673,7 @@ local rename-ty env state ty =
               |> add-diagnostic state
 
             env, state, :error ty.span
+
         :none ->
           let env, state, input = rename-ty env state ty.input
 
@@ -592,7 +713,11 @@ local find-ty env state name =
 
       _ -> :some name
 
-    :none -> find-imported-ty env state name
+    :none -> env.imports
+      |> find-map \unique.
+        map.get unique state.modules
+          |> try-map-some \env.
+            map.get name env.types
 
 local find-imported-ty env state name =
   env.imports |> find-map \unique.
@@ -627,7 +752,7 @@ local rename-exprs env state exprs =
     let state, expr = rename-expr env state expr
     state, list.append [expr] exprs
 
-is env -> state -> expr str -> state, expr name
+is env -> state -> expr str {} -> state, expr name {}
 local rename-expr env state expr =
   match expr
     :var expr ->
@@ -636,6 +761,7 @@ local rename-expr env state expr =
           let var = :var {
             name: name
             span: expr.span
+            ty:   {}
           }
 
           match name.kind
@@ -674,6 +800,7 @@ local rename-expr env state expr =
       state, :nat' {
         value: expr.value
         span:  expr.span
+        ty:    {}
       }
 
     :str' expr ->
@@ -692,11 +819,24 @@ local rename-expr env state expr =
 
     :field expr ->
       match get-var-module env state expr.input
-        :some (env, name) -> match map.get expr.name env.variables
+        :some (module, name) -> match map.get expr.name module.variables
           :some name ->
+            let state = match name.kind
+              :global unique ->
+                let dependencies = map.get env.this state.dependencies
+                  |> some-or set.empty
+                  |> set.insert unique
+
+                state with {
+                  dependencies: map.insert env.this dependencies state.dependencies
+                }
+
+              _ -> state
+
             state, :var {
               name: name
               span: expr.span
+              ty:   {}
             }
 
           :none ->
@@ -710,6 +850,7 @@ local rename-expr env state expr =
               |> add-diagnostic state
 
             state, :error expr.span
+
         :none ->
           let state, input = rename-expr env state expr.input
 
@@ -729,6 +870,7 @@ local rename-expr env state expr =
         input:  input
         fields: fields
         span:   expr.span
+        ty:     {}
       }
 
     :apply expr ->
@@ -818,6 +960,7 @@ local rename-expr env state expr =
         op-span: expr.op-span
         rhs:     rhs
         span:    expr.span
+        ty:      {}
       }
 
     :block expr ->
