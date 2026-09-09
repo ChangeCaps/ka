@@ -10,7 +10,11 @@ pub fn codegen(program: &Program, main: Id<Var>) -> String {
     let mut output = String::from(include_str!("prelude.lua"));
 
     for (id, global) in program.globals.iter() {
-        let var = format!("GLOBAL{}()", id.index());
+        let var = match global.expr {
+            Expr::Lambda(..) => format!("GLOBAL{}", id.index()),
+            _ => format!("GLOBAL{}()", id.index()),
+        };
+
         codegen.pat(&global.pat, var);
     }
 
@@ -22,12 +26,17 @@ pub fn codegen(program: &Program, main: Id<Var>) -> String {
             output += &format!("-- {}\n", program.vars[pat.var].name);
         }
 
-        output += &format!(
-            "GLOBAL{} = lazy(function() {} return {} end)",
-            id.index(),
-            codegen.pop_scope(len),
-            expr,
-        );
+        if matches!(global.expr, Expr::Lambda(..)) {
+            output += &codegen.pop_scope(len);
+            output += &format!("GLOBAL{} = {}", id.index(), expr);
+        } else {
+            output += &format!(
+                "GLOBAL{} = lazy(function() {} return {} end)",
+                id.index(),
+                codegen.pop_scope(len),
+                expr,
+            );
+        }
 
         output += "\n\n";
     }
@@ -315,7 +324,7 @@ impl<'a> Codegen<'a> {
                         let lhs = inputs.next().unwrap();
                         let rhs = inputs.next().unwrap();
 
-                        format!("bit.bxor({lhs}, {rhs})")
+                        format!("bit32.bxor({lhs}, {rhs})")
                     }
 
                     Intrinsic::StrLength => {

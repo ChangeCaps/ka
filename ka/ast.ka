@@ -62,6 +62,7 @@ type expr 'name 'ty =
   | :do'      do-expr 'name 'ty
   | :do-block do-block-expr 'name 'ty
   | :match'   match-expr 'name 'ty
+  | :extern'  extern-expr 'name 'ty
   | :error    span
 
 type import-def = {
@@ -327,6 +328,12 @@ type match-expr 'name 'ty = {
   span:  span
 }
 
+type extern-expr 'name 'ty = {
+  id:   str
+  ty:   ty 'name
+  span: span
+}
+
 type do-block-stmt 'name 'ty =
   | :let' let' 'name 'ty
   | :bind bind 'name 'ty
@@ -436,4 +443,5 @@ expr-span expr =
     :do' expr      -> expr.span
     :do-block expr -> expr.span
     :match' expr   -> expr.span
+    :extern' expr  -> expr.span
     :error  span   -> span

@@ -172,6 +172,8 @@ local simplify-expr env expr =
 
     :prim prim ->
       match prim
+        :extern' extern' -> :prim :extern' extern'
+
         :unary (op, expr) ->
           let expr = simplify-expr env expr
           :prim :unary (op, expr)
@@ -250,5 +252,6 @@ local uses var expr =
 
     :prim prim ->
       match prim
+        :extern' _ -> 0
         :unary (op, expr) -> uses var expr
         :binary (op, lhs, rhs) -> uses var lhs + uses var rhs

@@ -1,0 +1,12 @@
+import "std:string" as string
+
+import "intrinsic" as intrinsic
+
+is str -> 'a -> 'a
+trace msg x = intrinsic.trace (append "\n" msg, x)
+
+is 'a -> 'a
+debug x = trace (format x) x
+
+is 'a -> 'a
+debug-pretty x = trace (format-pretty x) x

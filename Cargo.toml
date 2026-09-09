@@ -7,6 +7,10 @@ edition = "2024"
 owo-colors = "4"
 seahash = "4"
 
+[dependencies.mlua]
+version = "0.12"
+features = ["luau-jit"]
+
 [dependencies.clap]
 version = "4.6"
 features = ["derive"]

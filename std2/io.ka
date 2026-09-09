@@ -1,0 +1,23 @@
+import "std:result"  as std-result
+import "std:dynamic"
+
+type error =
+  | :not-found
+
+type result 'a = std-result.result 'a error
+
+is !str
+readln = extern "io::readln" is !str
+
+is 'a -> !{}
+print x =
+  let print = extern "io::print" is str -> !{}
+
+  match dynamic x
+    :str' s -> print s
+    _       -> print (format x)
+
+is 'a -> !{}
+println x = do
+  print x
+  print "\n"

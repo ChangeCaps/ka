@@ -1,0 +1,4 @@
+import "std:io" as io
+
+is io.result str
+x = (:err :not-found)

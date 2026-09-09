@@ -46,16 +46,17 @@ def-type =
   let param = token :quote
     |> thenr ident
 
-  token :type'
-    |> thenr ident
+  def-local
+    |> thenl (token :type')
+    |> then ident
     |> then (many0 param)
     |> thenl (expect :eq)
     |> then (expect-ty [:newline] ty)
     |> spanned
-    |> flatten4
-    |> map \name, params, ty, span.
+    |> flatten5
+    |> map \is-local, name, params, ty, span.
       :type' {
-        is-local: :false
+        is-local: is-local
         name:     name
         params:   params
         ty:       ty
@@ -800,9 +801,10 @@ expr-field =
         }
 
 expr-term = expr-var
-  |> else expr-nat'
-  |> else expr-str'
+  |> else expr-nat
+  |> else expr-str
   |> else expr-paren
+  |> else expr-extern
   |> else expr-list
   |> else expr-lambda
   |> else expr-record
@@ -816,7 +818,7 @@ expr-var = ident
       ty:   {}
     }
 
-expr-str' = string
+expr-str = string
   |> spanned
   |> map \value, span.
     :str' {
@@ -824,7 +826,7 @@ expr-str' = string
       span:  span
     }
 
-expr-nat' = number
+expr-nat = number
   |> spanned
   |> map \value, span.
     :nat' {
@@ -841,6 +843,20 @@ expr-paren =
     |> map \expr, span.
       :paren {
         expr: expr
+        span: span
+      }
+
+expr-extern =
+  token :extern'
+    |> thenr string
+    |> thenl (expect :is')
+    |> then (expect-ty expr-rs ty)
+    |> spanned
+    |> flatten
+    |> map \id, ty, span.
+      :extern' {
+        id:   id
+        ty:   ty
         span: span
       }
 

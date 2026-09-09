@@ -1,7 +1,7 @@
 use std::{
-    ffi, fs, io,
+    ffi, fs,
+    io::{self, Write},
     path::{Path, PathBuf},
-    process,
     time::Instant,
 };
 
@@ -13,6 +13,7 @@ use ka::{
     lex::Tokens,
     parse::{self, Parser},
 };
+use mlua::{Lua, state::JitOptions};
 
 #[derive(clap::Parser)]
 struct Args {
@@ -87,24 +88,63 @@ impl Compiler {
         }
 
         if let Some(main) = main {
-            let lua = ka::lua::codegen(&program, main);
+            let source = ka::lua::codegen(&program, main);
 
-            fs::write("out.lua", lua).unwrap();
+            let lua = Lua::new();
 
-            #[cfg(debug_assertions)]
-            process::Command::new("stylua")
-                .arg("out.lua")
-                .output()
+            lua.set_jit_options(JitOptions::new().inliner(true));
+
+            let print = lua
+                .create_function(|_, path: String| {
+                    let mut stdout = io::stdout();
+                    let _ = stdout.write_all(path.as_bytes());
+                    let _ = stdout.flush();
+
+                    Ok(())
+                })
                 .unwrap();
 
-            process::Command::new("luajit")
-                .arg("-O3")
-                .arg("out.lua")
-                .stdin(process::Stdio::inherit())
-                .stdout(process::Stdio::inherit())
-                .stderr(process::Stdio::inherit())
-                .output()
+            let read = lua
+                .create_function(|_, path: String| match fs::read_to_string(path) {
+                    Ok(contents) => Ok((contents, true)),
+                    Err(_) => Ok((String::new(), false)),
+                })
                 .unwrap();
+
+            let write = lua
+                .create_function(|_, (path, contents): (String, String)| {
+                    Ok(fs::write(path, contents).is_ok())
+                })
+                .unwrap();
+
+            let read_dir = lua
+                .create_function(|_, path: String| match fs::read_dir(path) {
+                    Ok(entries) => {
+                        let entries = entries
+                            .flatten()
+                            .map(|entry| entry.path().to_string_lossy().to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        Ok((entries, true))
+                    }
+                    Err(_) => Ok((String::new(), false)),
+                })
+                .unwrap();
+
+            let is_dir = lua
+                .create_function(|_, path: String| Ok(Path::new(&path).is_dir()))
+                .unwrap();
+
+            lua.globals().set("print", print).unwrap();
+            lua.globals().set("read", read).unwrap();
+            lua.globals().set("write", write).unwrap();
+            lua.globals().set("readdir", read_dir).unwrap();
+            lua.globals().set("isdir", is_dir).unwrap();
+
+            if let Err(e) = lua.load(source).exec() {
+                eprintln!("{e}");
+            }
         }
     }
 

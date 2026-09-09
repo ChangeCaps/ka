@@ -1,6 +1,5 @@
 import "std:io" as io
 import "std:fs" as fs
-import "std:os" as os
 import "std:debug"
 import "std:string" as string
 import "std:result" as result
@@ -20,7 +19,7 @@ import "ka:ir"
 
 main = do
   let result <- compiler
-    |> add-package "test" "test"
+    |> add-package "ka" "ka"
 
   let result <- result
     |> try-then \compiler.
@@ -28,7 +27,7 @@ main = do
 
   match result
     :ok compiler -> compile compiler
-    :err e -> print e 
+    :err e -> print e
 
 compiler = {
   files: []
@@ -36,7 +35,7 @@ compiler = {
 }
 
 compile compiler = do
-  let renamed, ds' = rename compiler.files
+  let renamed, main, ds' = rename compiler.files (:some "test:main")
   let ds = append ds' compiler.diagnostics
 
   println "renamed"
@@ -46,14 +45,21 @@ compile compiler = do
 
   println "type checked"
 
-  print-all ds
+  match main
+    :some main -> do
+      let ir, main = lower typechecked main
+      let ir' = simplify ir
 
-  let ir = lower typechecked
-  let ir = simplify ir
+      let lua <- lua ir main
 
-  let lua = lua ir
-  fs.write "test.lua" lua
-  os.execute ["stylua"; "test.lua"]
+      print-all ds
+
+      fs.write "test.lua" lua
+      do {}
+    :none -> do
+      println "could not find main"
+
+      print-all ds
 
   do {}
 
@@ -66,21 +72,17 @@ add-package-dir parent path compiler = do
 
   result |> try-then \paths. do
     paths |> mfold (:ok compiler) \compiler entry. do
-      let path = path
-        |> string.append "/"
-        |> string.append entry
-
-      compiler |> try-then (add-package-path parent path)
+      compiler |> try-then (add-package-path parent entry)
 
 add-package-path parent path compiler = do
   let is-dir <- fs.is-dir path
 
   match is-dir
     :true -> match file-name path
-      :some name ->
+      :some name -> do
         let name = parent
-          |> string.append "/"
           |> string.append name
+          |> string.append "/"
 
         add-package-dir name path compiler
       :none -> do :ok compiler

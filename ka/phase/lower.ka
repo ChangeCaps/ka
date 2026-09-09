@@ -9,7 +9,7 @@ import "ka:phase/typecheck" as typecheck
 import "ka:ast"             as ast
 import "ka:ir"              as ir
 
-lower program =
+lower program main =
   let state = {
     next-id: 0
     bounds: program.bounds
@@ -36,7 +36,10 @@ lower program =
       let state, expr = lower-expr state env lambda
       state, (var, expr) :: binds
 
-  binds
+  let main = map.get main.unique env.vars
+    |> assert-some "vars are always registered"
+
+  binds, main
 
 local type state = {
   next-id: nat
@@ -269,7 +272,14 @@ local lower-expr state env expr =
 
       lower-case state env [input] arms
 
-    _ -> panic (string.format expr)
+    :extern' expr ->
+      let extern' = {
+        id: expr.id
+      }
+
+      state, :prim :extern' extern'
+
+    :error _ -> panic "ast with errors"
 
 local lower-let state env stmt output =
   let lambda = :lambda {
@@ -343,7 +353,7 @@ local lower-case state env scrutinees arms =
       let scrutinee, scrutinees = list.pop scrutinees
         |> assert-some "must always have at least one scrutinee"
 
-      let list arms =
+      let list' arms =
         let cons, empty, wild = arms
           |> list.rfold ([], [], []) \cons, empty, wild pats, expr.
             let head, tail = pop pats
@@ -431,8 +441,8 @@ local lower-case state env scrutinees arms =
 
           lower-case state env scrutinees arms
 
-        :empty _ -> list arms
-        :cons _ -> list arms
+        :empty _ -> list' arms
+        :cons _ -> list' arms
 
         :variant _ ->
           let variants, wild = arms
@@ -466,7 +476,7 @@ local lower-case state env scrutinees arms =
               state, [(:default, expr)]
 
           let state, alts = variants
-            |> map.list
+            |> map.pairs
             |> list.rfold (state, alts) \state, alts name, (payload, arms).
               let state, scrutinees, payload = match payload
                 :true ->

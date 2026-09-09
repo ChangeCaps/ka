@@ -1,25 +1,60 @@
+import "std:fs"     as fs
+import "std:set"    as set
 import "std:list"   as list
 import "std:hash"   as hash
 import "std:string" as string
 import "std:assert" as assert
+import "std:result" as result
 
 import "ka:ir"
 
-lua program =
-  program
-    |> list.fold "" \body var, expr.
-      let body, expr = lua-expr body expr
+lua program main = do
+  let global = program
+    |> fold set.empty \global var, _.
+      set.insert var.id global
 
-      body
+  let state = {
+    global: global
+  }
+
+  let program = program
+    |> fold "" \program var, expr.
+      let body, expr = lua-expr state "" expr
+
+      program
         |> string.append (lua-var var)
-        |> string.append " = "
+        |> string.append " = lazy(function() "
+        |> string.append body
+        |> string.append " return "
         |> string.append expr
+        |> string.append " end)"
         |> string.append "\n"
 
-is str -> expr -> str, str
-lua-expr body expr =
+  let prelude <- fs.read "src/prelude.lua"
+
+  let program, main = lua-expr state program main
+
+  do "#!/usr/bin/env lua"
+    |> string.append (assert-ok prelude)
+    |> string.append program
+    |> string.append main
+    |> string.append "()"
+
+local type state = {
+  global: set nat
+}
+
+is state -> str -> expr -> str, str
+local lua-expr state body expr =
   match expr
-    :var var -> body, lua-var var
+    :var var ->
+      match set.has var.id state.global
+        :true ->
+          let expr = lua-var var
+            |> string.append "()"
+
+          body, expr
+        :false -> body, lua-var var
 
     :lit lit ->
       let lit = match lit
@@ -41,7 +76,7 @@ lua-expr body expr =
 
     :lam (var, expr) ->
       let expr =
-        let body, expr = lua-expr "" expr
+        let body, expr = lua-expr state "" expr
 
         "function("
           |> string.append (lua-var var)
@@ -54,18 +89,19 @@ lua-expr body expr =
       body, expr
 
     :app (lambda, input) ->
-      let body, lambda = lua-expr body lambda
-      let body, input = lua-expr body input
+      let body, lambda = lua-expr state body lambda
+      let body, input = lua-expr state body input
 
       let expr = lambda
-        |> string.append "("
+        |> string.prepend "("
+        |> string.append ")("
         |> string.append input
         |> string.append ")"
 
       body, expr
 
     :field (expr, field) ->
-      let body, expr = lua-expr body expr
+      let body, expr = lua-expr state body expr
 
       let field = match field
         :name s -> s
@@ -77,10 +113,15 @@ lua-expr body expr =
           |> string.prepend "["
           |> string.append "]"
 
-      body, string.prepend expr field
+      let expr = expr
+        |> string.prepend "("
+        |> string.append ")"
+        |> string.append field
+
+      body, expr
 
     :bind (input, var, output) ->
-      let body, input = lua-expr body input
+      let body, input = lua-expr state body input
 
       let body = body
         |> string.append " local "
@@ -88,10 +129,10 @@ lua-expr body expr =
         |> string.append " = "
         |> string.append input
 
-      lua-expr body output
+      lua-expr state body output
 
     :case (scrutinee, arms) ->
-      let body, scrutinee = lua-expr body scrutinee
+      let body, scrutinee = lua-expr state body scrutinee
 
       let result = "result"
         |> string.append (string.format (hash scrutinee))
@@ -105,17 +146,17 @@ lua-expr body expr =
 
       let body = arms
         |> fold body \body alt, expr.
-          let inner, expr = lua-expr "" expr
-
           let inner, condition = match alt
+            :variant ("true", :none) -> "", "scrutinee == true"
+            :variant ("false", :none) -> "", "scrutinee == false"
+
             :variant (name, payload) ->
               let inner = match payload
                 :some payload ->
-                  inner
-                    |> string.append " local "
+                  " local "
                     |> string.append (lua-var payload)
                     |> string.append " = scrutinee[\"$payload\"]"
-                :none -> inner
+                :none -> ""
 
               let condition = "scrutinee[\"$variant\"] == "
                 |> string.append "\""
@@ -125,8 +166,7 @@ lua-expr body expr =
               inner, condition
 
             :cons (head, tail) ->
-              let inner = inner
-                |> string.append " local "
+              let inner = " local "
                 |> string.append (lua-var head)
                 |> string.append " = scrutinee[\"$first\"]"
                 |> string.append " local "
@@ -135,9 +175,11 @@ lua-expr body expr =
 
               inner, "not scrutinee[\"$empty\"]"
 
-            :empty -> inner, "scrutinee[\"$empty\"]"
+            :empty -> "", "scrutinee[\"$empty\"]"
 
-            :default -> inner, "true"
+            :default -> "", "true"
+
+          let inner, expr = lua-expr state inner expr
 
           body
             |> string.append " elseif "
@@ -152,15 +194,168 @@ lua-expr body expr =
 
       body, result
 
+    :cons cons ->
+      match cons
+        :variant ("true", :none) -> body, "true"
+        :variant ("false", :none) -> body, "false"
+
+        :variant (name, :some payload) ->
+          let body, payload = lua-expr state body payload
+
+          let expr = "variant(\""
+            |> string.append name
+            |> string.append "\", "
+            |> string.append payload
+            |> string.append ")"
+
+          body, expr
+
+        :variant (name, :none) ->
+          let expr = "variant(\""
+            |> string.append name
+            |> string.append "\")"
+
+          body, expr
+
+        :empty -> body, "empty"
+
+        :cons (head, tail) ->
+          let body, head = lua-expr state body head
+          let body, tail = lua-expr state body tail
+
+          let expr = "cons("
+            |> string.append head
+            |> string.append ", "
+            |> string.append tail
+            |> string.append ")"
+
+          body, expr
+
+        :tuple fields ->
+          let body, fields = fields
+            |> fold (body, []) \body, fields field.
+              let body, field = lua-expr state body field
+              body, list.append [field] fields
+
+          let expr = "{ "
+            |> string.append (string.join ", " fields)
+            |> string.append " }"
+
+          body, expr
+
+        :record (from, fields) ->
+          let body, fields = fields
+            |> fold (body, []) \body, fields name, expr.
+              let body, expr = lua-expr state body expr
+
+              let field = "[\""
+                |> string.append name
+                |> string.append "\"] = "
+                |> string.append expr
+
+              body, list.append [field] fields
+
+          let expr = "{ "
+            |> string.append (string.join ", " fields)
+            |> string.append " }"
+
+          match from
+            :some from ->
+              let body, from = lua-expr state body from
+              
+              let expr = "with("
+                |> string.append from
+                |> string.append ", "
+                |> string.append expr
+                |> string.append ")"
+
+              body, expr
+
+            :none -> body, expr
+
+        _ -> panic (string.format cons)
+
     :prim prim ->
       match prim
+        :extern' extern' ->
+          let expr = "extern[\""
+            |> string.append extern'.id
+            |> string.append "\"]"
+
+          body, expr
+
         :unary (op, expr) ->
-          panic (string.format op)
+          let body, expr = lua-expr state body expr
+
+          let call f =
+            let expr = f
+              |> string.append "("
+              |> string.append expr
+              |> string.append ")"
+
+            body, expr
+
+          match op
+            :dynamic -> call "dynamic"
+            :panic -> call "panic"
+
+            :num-to-str _ -> call "tostring"
+            :num-hash _ -> call "hashnum"
+
+            :str-hash -> call "hashstr"
+            :str-length -> call "strlength"
+
+            :io-pure -> call "pure"
 
         :binary (op, lhs, rhs) ->
-          panic (string.format op)
+          let body, lhs = lua-expr state body lhs
+          let body, rhs = lua-expr state body rhs
 
-    _ -> panic (string.format expr)
+          let call f =
+            let expr = f
+              |> string.append "("
+              |> string.append lhs
+              |> string.append ", "
+              |> string.append rhs
+              |> string.append ")"
+
+            body, expr
+
+          let binary op =
+            let expr = "("
+              |> string.append lhs
+              |> string.append " "
+              |> string.append op
+              |> string.append " "
+              |> string.append rhs
+              |> string.append ")"
+
+            body, expr
+
+          match op
+            :add _ -> binary "+"
+            :sub _ -> binary "-"
+            :mul _ -> binary "*"
+            :div _ -> binary "/"
+            :gt _ -> binary ">"
+            :lt _ -> binary "<"
+            :ge _ -> binary ">="
+            :le _ -> binary "<="
+            :land -> binary "and"
+            :lor -> binary "or"
+
+            :eq -> call "eq"
+            :ne -> call "ne"
+
+            :trace -> call "trace"
+
+            :nat-xor -> call "bit.bxor"
+
+            :str-prepend -> binary ".."
+            :str-split-at -> call "strsplitat"
+            :str-find -> call "strfind"
+
+            :io-bind -> call "bind"
 
 lua-var var =
   string.format var.id

@@ -77,6 +77,7 @@ type global = {
 typecheck renamed =
   let state = {
     this:   0
+    next:   0
     names:  map.empty
     cache:  map.empty
     bounds: map.empty
@@ -103,6 +104,7 @@ typecheck renamed =
 
 local type state = {
   this:   unique
+  next:   nat
   names:  map unique ty
   cache:  map (ty, ty) {}
   bounds: map nat bound
@@ -200,7 +202,7 @@ local typecheck-global globals state checked global =
 
       let state, checked, globals = map.get global.unique state.dependencies
         |> some-or set.empty
-        |> set.list
+        |> set.items
         |> list.filter-map \global. map.get global globals
         |> list.fold (state, checked, []) \state, checked, outputs global.
           let state, checked, output = typecheck-global globals state checked global
@@ -241,7 +243,12 @@ local typecheck-global globals state checked global =
         span:   global.span
       }
 
+      let name = match global.pat
+        :bind pat -> pat.name.label
+        _ -> ""
+
       state, checked, global :: globals
+        |> trace (string.append name "typechecked: ")
 
 is state -> [unique] -> unique -> bool
 local is-recursive state seen global =
@@ -251,7 +258,7 @@ local is-recursive state seen global =
       :true -> :true
       :false -> map.get global state.dependencies
         |> some-or set.empty
-        |> set.list
+        |> set.items
         |> list.any (is-recursive state (global :: seen))
 
 is state -> [ast.ty name] -> state, [ty]
@@ -917,6 +924,15 @@ local typecheck-expr state expr =
         span:  expr.span
       }
 
+    :extern' expr ->
+      let state, ty = typecheck-ty state expr.ty
+
+      state, ty, :extern' {
+        id:   expr.id
+        ty:   expr.ty
+        span: expr.span
+      }
+
     :error span ->
       let state, ty = add-inferred state
       state, ty, :error span
@@ -1038,7 +1054,9 @@ local matrix-ty state col =
             payload: payload
           }
 
-          state, variant :: variants
+          match variants |> list.any \v. v.name == name
+            :true -> state, variants
+            :false -> state, variant :: variants
 
       match union.is-open
         :true ->
@@ -1546,7 +1564,7 @@ local unify-variant state ty variant prov side =
       :none -> :true, set-bound state var (:union [variant])
       _ -> :false, state
 
-    :union vs -> 
+    :union vs ->
       match vs |> list.find \v. v.name == variant.name
         :none -> :false, state
         :some v -> match v.payload, variant.payload
@@ -1857,15 +1875,14 @@ local report state diagnostic =
 
 is state -> option str -> bound -> state, var
 local add-var state name bound =
-  let index = map.count state.bounds
-
   let var = {
     name:  name
-    index: index
+    index: state.next
   }
 
   let state = state with {
-    bounds: map.insert index bound state.bounds
+    next:   state.next + 1
+    bounds: map.insert state.next bound state.bounds
   }
 
   state, var

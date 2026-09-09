@@ -16,7 +16,7 @@ lex file input =
     remaining: input
   }
 
-  let ts, ds = line state [] []
+  let ts, ds = line (state, [], [])
 
   let tokens = {
     file:   file
@@ -33,7 +33,7 @@ local type state = {
   remaining: str
 }
 
-local tokens state ts ds =
+local tokens state, ts, ds =
   match first state.remaining
     :none -> ts, ds
 
@@ -42,26 +42,26 @@ local tokens state ts ds =
       let state = advance 1 state
       let ts = (:newline, i) :: ts
 
-      line state ts ds
+      line (state, ts, ds)
 
     :some _ ->
       let state, ts, ds = token state ts ds
-      tokens state ts ds
+      tokens (state, ts, ds)
 
-local line state ts ds =
+local line state, ts, ds =
   let whitespace = state.remaining
     |> take-while is-whitespace
 
   match :some length whitespace == find "\n" state.remaining
     :true ->
       let state = advance (length whitespace) state
-      tokens state ts ds
+      tokens (state, ts, ds)
 
     :false ->
       let state, n, ds = skip-indents state (reverse state.indent) ds
       let state, ts = pop-indent state ts n
       let state, ts = push-indent state ts
-      tokens state ts ds
+      tokens (state, ts, ds)
 
 local skip-indents state xs ds = match xs
   [] -> state, 0, ds
@@ -256,13 +256,17 @@ local advance n state =
     remaining: remaining
   }
 
-local take-while f s =
+local take-while f s = take-while-iter (f, "", s)
+
+local take-while-iter f, s', s =
   match pop s
-    :some (char, rest) ->
-      match f char
-        :true -> take-while f rest |> prepend char
-        :false -> ""
-    :none -> ""
+    :some (c, rest) ->
+      match f c
+        :true ->
+          let s' = string.append c s'
+          take-while-iter (f, s', rest)
+        :false -> s'
+    :none -> s'
 
 local digits = "0123456789"
 local alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"

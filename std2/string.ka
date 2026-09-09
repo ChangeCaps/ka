@@ -4,6 +4,8 @@ import "std:dynamic"
 
 import "intrinsic" as intrinsic
 
+ansi-escape = extern "string::ansi-escape" is str
+
 is str -> nat
 length x = intrinsic.str-length x
 

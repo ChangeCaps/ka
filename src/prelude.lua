@@ -17,61 +17,53 @@ local empty = { ['$empty'] = true }
 local extern = {
   ["io::print"] = function(x)
     return function()
-      io.write(x)
+      print(x)
     end
   end,
   ["fs::read"] = function(path)
     return function()
-      local file = io.open(path, "r")
+      local output, success = read(path)
 
-      if file == nil then
+      if success then
+        return variant("ok", output)
+      else
         return variant("err", variant("not-found"))
       end
-
-      local contents = file:read("*a")
-      file:close()
-
-      if contents == nil then
-        return variant("err", variant("not-found"))
-      end
-
-      return variant("ok", contents)
     end
   end,
   ["fs::write"] = function(path)
     return function(x)
       return function()
-        local file = io.open(path, "w")
+        local success = write(path, x)
 
-        if file == nil then
+        if success then
+          return variant("ok", {})
+        else
           return variant("err", variant("not-found"))
         end
-
-        local _, err = file:write(x)
-
-        if err ~= nil then
-          return variant("err", variant("not-found"))
-        end
-
-        file:close()
-
-        return variant("ok", {})
       end
     end
   end,
-  ["os::execute"] = function(cmd)
+  ["fs::read-dir"] = function(path)
     return function()
-      local file = io.popen(cmd, "r")
+      local entries = empty
 
-      if not file then
+      local output, success = readdir(path)
+
+      if not success then
         return variant("err", variant("not-found"))
       end
 
-      local output = file:read("*a")
+      for _, entry in string.split(output, "\n") do
+        entries = cons(entry, entries)
+      end
 
-      local _, _, code = file:close()
-
-      return variant("ok", { code, output })
+      return variant("ok", entries)
+    end
+  end,
+  ["fs::is-dir"] = function(path)
+    return function()
+      return isdir(path)
     end
   end,
   ["string::ansi-escape"] = "\x1b",
@@ -97,6 +89,24 @@ local function copy(x)
   end
 
   return output
+end
+
+local function with(x, fields)
+  x = copy(x)
+
+  for k, v in pairs(fields) do
+    x[k] = v
+  end
+
+  return x
+end
+
+local function pure(x)
+  return function() return x end
+end
+
+local function bind(x, y)
+  return y(x())
 end
 
 local function panic(message)
@@ -157,7 +167,7 @@ local function dynamic(x)
 end
 
 local function trace(message, x)
-  io.write(message)
+  print(message)
   return x
 end
 

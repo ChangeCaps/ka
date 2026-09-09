@@ -1,0 +1,7 @@
+import "std:io" as io
+
+read = extern "fs::read" is str -> !io.result str
+write = extern "fs::write" is str -> str -> !io.result {}
+
+is-dir = extern "fs::is-dir" is str -> !bool
+read-dir = extern "fs::read-dir" is str -> !io.result [str]

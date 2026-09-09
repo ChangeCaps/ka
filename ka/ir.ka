@@ -42,8 +42,13 @@ type lit =
   | :real' real
 
 type prim =
+  | :extern' extern'
   | :unary (unary, expr)
   | :binary (binary, expr, expr)
+
+type extern' = {
+  id: str
+}
 
 type unary =
   | :dynamic
@@ -214,6 +219,11 @@ local format-expr indent p expr =
 
     :prim prim ->
       match prim
+        :extern' extern' ->
+          "(extern \""
+            |> string.append extern'.id
+            |> string.append "\")"
+
         :unary (unary, expr) ->
           let op = match unary
             :dynamic -> "dynamic"

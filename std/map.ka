@@ -32,13 +32,13 @@ is 'k -> map 'k 'v -> map 'k 'v
 remove key map = remove-hashed (hash key) key map
 
 is map 'k 'v -> ['k, 'v]
-list map = extend-list map []
+pairs map = extend-list map []
 
 is map 'k 'v -> ['k]
-keys map = list map |> list.map \k, _. k
+keys map = pairs map |> list.map \k, _. k
 
 is map 'k 'v -> ['v]
-values map = list map |> list.map \_, v. v
+values map = pairs map |> list.map \_, v. v
 
 local extend-list map xs = match map
   :none -> xs

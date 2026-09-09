@@ -70,8 +70,8 @@ type kind =
   | :intrinsic intrinsic
   | :global unique
 
-is [str, [module-def]] -> renamed, [diagnostic]
-rename modules =
+is [str, [module-def]] -> option str -> renamed, option name, [diagnostic]
+rename modules main =
   let state = {
     aliases: []
     globals: map.empty
@@ -101,10 +101,10 @@ rename modules =
       }
 
       let env = prelude
-        |> list.fold env \env path, name.
-          let module = map.get path state.imports
-            |> assert-some "std modules should exist"
-
+        |> list.filter-map \path, name.
+          map.get path state.imports
+            |> map-some \module. path, name, module
+        |> list.fold env \env path, name, module.
           let name = {
             unique: module
             label:  name
@@ -127,7 +127,7 @@ rename modules =
       let env, state, globals, types = defs
         |> list.fold (env, state, [], []) partial-def
 
-      let module = map.list env.types
+      let module = map.pairs env.types
         |> list.fold env \env label, name.
           match name.kind
             :import' ->
@@ -136,7 +136,7 @@ rename modules =
               }
             _ -> env
 
-      let module = map.list env.variables
+      let module = map.pairs env.variables
         |> list.fold module \env label, name.
           match name.kind
             :import' ->
@@ -161,13 +161,21 @@ rename modules =
 
       state
 
+  let main = main
+    |> try-map-some \main.
+      map.get main state.imports
+    |> try-map-some \module.
+      map.get module state.modules
+    |> try-map-some \env.
+      map.get "main" env.variables
+
   let renamed = {
     aliases: state.aliases
     globals: state.globals
     dependencies: state.dependencies
   }
 
-  renamed, state.diagnostics
+  renamed, main, state.diagnostics
 
 local type env = {
   this:      unique
@@ -218,10 +226,15 @@ local add-intrinsic state =
   }
 
 local prelude = [
-  "std:bool", "bool"
-  "std:list", "list"
+  "std:set",    "set"
+  "std:map",    "map"
+  "std:string", "string"
+  "std:list",   "list"
   "std:option", "option"
-  "std:hash", "hash"
+  "std:hash",   "hash"
+  "std:assert", "assert"
+  "std:debug",  "debug"
+  "std:bool",   "bool"
 ]
 
 local intrinsics = [
@@ -1028,6 +1041,15 @@ local rename-expr env state expr =
         span:  expr.span
       }
 
+    :extern' expr ->
+      let _env, state, ty = rename-ty env state expr.ty
+
+      state, :extern' {
+        id:   expr.id
+        ty:   ty
+        span: expr.span
+      }
+
     :error span -> state, :error span
 
 local get-var-module env state expr = match expr
@@ -1079,8 +1101,8 @@ local rename-expr-field env state field =
 local rename-let env state stmt =
   let _env, state, ty = rename-option-ty env state stmt.ty
 
-  let env, state, params = rename-pats env state stmt.params :local'
-  let state, input = rename-expr env state stmt.input
+  let env', state, params = rename-pats env state stmt.params :local'
+  let state, input = rename-expr env' state stmt.input
 
   let env, state, pat = rename-pat env state stmt.pat :local'
 
