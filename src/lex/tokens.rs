@@ -287,23 +287,33 @@ impl<'a> Lexer<'a> {
         self.consume();
 
         let mut is_escape = false;
-        let string = self.consume_while(|c| {
+        let mut string = String::new();
+        self.consume_while(|c| {
             if Self::is_string_delimiter(c) && !is_escape {
                 return false;
             }
 
-            is_escape = c == '\\' && !is_escape;
+            if is_escape {
+                let c = match c {
+                    '\\' => '\\',
+                    '\"' => '\"',
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    '0' => '\0',
+                    _ => panic!(),
+                };
+
+                string.push(c);
+                is_escape = false;
+            } else if c == '\\' {
+                is_escape = true;
+            } else {
+                string.push(c);
+            }
 
             true
         });
-
-        let string = string
-            .replace("\\n", "\n")
-            .replace("\\r", "\r")
-            .replace("\\t", "\t")
-            .replace("\\0", "\0")
-            .replace("\\\\", "\\")
-            .replace("\\\"", "\"");
 
         let string = self.interner.intern(string);
 

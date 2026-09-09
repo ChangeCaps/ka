@@ -1,0 +1,167 @@
+import "std:list"   as list
+import "std:hash"   as hash
+import "std:string" as string
+import "std:assert" as assert
+
+import "ka:ir"
+
+lua program =
+  program
+    |> list.fold "" \body var, expr.
+      let body, expr = lua-expr body expr
+
+      body
+        |> string.append (lua-var var)
+        |> string.append " = "
+        |> string.append expr
+        |> string.append "\n"
+
+is str -> expr -> str, str
+lua-expr body expr =
+  match expr
+    :var var -> body, lua-var var
+
+    :lit lit ->
+      let lit = match lit
+        :str' s ->
+          s |> string.replace "\\" "\\\\"
+            |> string.replace "\"" "\\\""
+            |> string.replace "\n" "\\n"
+            |> string.replace "\r" "\\r"
+            |> string.replace "\t" "\\t"
+            |> string.replace "\0" "\\0"
+            |> string.prepend "\""
+            |> string.append "\""
+
+        :nat' x -> string.format x
+        :int' x -> string.format x
+        :real' x -> string.format x
+
+      body, lit
+
+    :lam (var, expr) ->
+      let expr =
+        let body, expr = lua-expr "" expr
+
+        "function("
+          |> string.append (lua-var var)
+          |> string.append ")"
+          |> string.append body
+          |> string.append " return "
+          |> string.append expr
+          |> string.append " end"
+
+      body, expr
+
+    :app (lambda, input) ->
+      let body, lambda = lua-expr body lambda
+      let body, input = lua-expr body input
+
+      let expr = lambda
+        |> string.append "("
+        |> string.append input
+        |> string.append ")"
+
+      body, expr
+
+    :field (expr, field) ->
+      let body, expr = lua-expr body expr
+
+      let field = match field
+        :name s -> s
+          |> string.prepend "[\""
+          |> string.append "\"]"
+
+        :index n -> n
+          |> string.format
+          |> string.prepend "["
+          |> string.append "]"
+
+      body, string.prepend expr field
+
+    :bind (input, var, output) ->
+      let body, input = lua-expr body input
+
+      let body = body
+        |> string.append " local "
+        |> string.append (lua-var var)
+        |> string.append " = "
+        |> string.append input
+
+      lua-expr body output
+
+    :case (scrutinee, arms) ->
+      let body, scrutinee = lua-expr body scrutinee
+
+      let result = "result"
+        |> string.append (string.format (hash scrutinee))
+
+      let body = body
+        |> string.append " local scrutinee = "
+        |> string.append scrutinee
+        |> string.append " local "
+        |> string.append result
+        |> string.append " if false then"
+
+      let body = arms
+        |> fold body \body alt, expr.
+          let inner, expr = lua-expr "" expr
+
+          let inner, condition = match alt
+            :variant (name, payload) ->
+              let inner = match payload
+                :some payload ->
+                  inner
+                    |> string.append " local "
+                    |> string.append (lua-var payload)
+                    |> string.append " = scrutinee[\"$payload\"]"
+                :none -> inner
+
+              let condition = "scrutinee[\"$variant\"] == "
+                |> string.append "\""
+                |> string.append name
+                |> string.append "\""
+
+              inner, condition
+
+            :cons (head, tail) ->
+              let inner = inner
+                |> string.append " local "
+                |> string.append (lua-var head)
+                |> string.append " = scrutinee[\"$first\"]"
+                |> string.append " local "
+                |> string.append (lua-var tail)
+                |> string.append " = scrutinee[\"$rest\"]"
+
+              inner, "not scrutinee[\"$empty\"]"
+
+            :empty -> inner, "scrutinee[\"$empty\"]"
+
+            :default -> inner, "true"
+
+          body
+            |> string.append " elseif "
+            |> string.append condition
+            |> string.append " then"
+            |> string.append inner
+            |> string.append " "
+            |> string.append result
+            |> string.append " = "
+            |> string.append expr
+        |> string.append " end"
+
+      body, result
+
+    :prim prim ->
+      match prim
+        :unary (op, expr) ->
+          panic (string.format op)
+
+        :binary (op, lhs, rhs) ->
+          panic (string.format op)
+
+    _ -> panic (string.format expr)
+
+lua-var var =
+  string.format var.id
+    |> string.prepend "v"

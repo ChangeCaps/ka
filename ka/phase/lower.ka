@@ -36,7 +36,7 @@ lower program =
       let state, expr = lower-expr state env lambda
       state, (var, expr) :: binds
 
-  binds |> trace (format binds)
+  binds
 
 local type state = {
   next-id: nat
@@ -239,7 +239,7 @@ local lower-expr state env expr =
 
     :do' expr ->
       let state, expr = lower-expr state env expr.expr
-      state, :prim :action :pure expr
+      state, :prim :unary (:io-pure, expr)
 
     :do-block expr ->
       match expr.stmts
@@ -257,7 +257,7 @@ local lower-expr state env expr =
                 _ ->
                   let state, var = add-var state :none
                   let state, block = lower-expr state env block
-                  state, :prim :action :bind (expr, :lam (var, block))
+                  state, :prim :binary (:io-bind, expr, :lam (var, block))
 
         [] -> state, :cons :record (:none, [])
 
@@ -290,7 +290,7 @@ local lower-bind state env stmt output =
   let state, input = lower-expr state env stmt.input
   let state, expr = lower-case state env [:var var] [[stmt.pat], output]
 
-  state, :prim :action :bind (input, :lam (var, expr))
+  state, :prim :binary (:io-bind, input, :lam (var, expr))
 
 local lower-pat state env pat expr =
   match pat

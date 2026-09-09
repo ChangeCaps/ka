@@ -203,16 +203,6 @@ local simplify-expr env expr =
 
             _, _ -> :prim :binary (op, lhs, rhs)
 
-        :action action ->
-          match action
-            :pure expr ->
-              :prim :action :pure simplify-expr env expr
-
-            :bind (a, b) ->
-              let a = simplify-expr env a
-              let b = simplify-expr env b
-              :prim :action :bind (a, b)
-
 is var -> expr -> nat
 local uses var expr =
   match expr
@@ -262,7 +252,3 @@ local uses var expr =
       match prim
         :unary (op, expr) -> uses var expr
         :binary (op, lhs, rhs) -> uses var lhs + uses var rhs
-        :action action ->
-          match action
-            :pure expr -> uses var expr
-            :bind (a, b) -> uses var a + uses var b

@@ -1,5 +1,6 @@
 import "std:io" as io
 import "std:fs" as fs
+import "std:os" as os
 import "std:debug"
 import "std:string" as string
 import "std:result" as result
@@ -14,6 +15,7 @@ import "ka:phase/typecheck"
 import "ka:phase/lower"
 import "ka:phase/simplify"
 import "ka:parse"
+import "ka:lua"
 import "ka:ir"
 
 main = do
@@ -49,10 +51,9 @@ compile compiler = do
   let ir = lower typechecked
   let ir = simplify ir
 
-  println ""
-  println "== SIMPLIFIED =="
-  println ""
-  println (format ir)
+  let lua = lua ir
+  fs.write "test.lua" lua
+  os.execute ["stylua"; "test.lua"]
 
   do {}
 

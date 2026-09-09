@@ -2,19 +2,6 @@ import "std:option" as option
 import "std:string" as string
 import "std:list" as list
 
-type ty =
-  | :str'
-  | :nat'
-  | :int'
-  | :real'
-  | :list ty
-  | :action ty
-  | :lambda (ty, ty)
-  | :tuple [ty]
-  | :record [str, ty]
-  | :union [str, option ty]
-  | :recurse nat
-
 type expr =
   | :var var
   | :lit lit
@@ -57,11 +44,15 @@ type lit =
 type prim =
   | :unary (unary, expr)
   | :binary (binary, expr, expr)
-  | :action action
 
-type action =
-  | :pure expr
-  | :bind (expr, expr)
+type unary =
+  | :dynamic
+  | :panic
+  | :num-to-str number
+  | :num-hash number
+  | :str-hash
+  | :str-length
+  | :io-pure
 
 type binary =
   | :add number
@@ -81,14 +72,7 @@ type binary =
   | :str-prepend
   | :str-split-at
   | :str-find
-
-type unary =
-  | :dynamic
-  | :panic
-  | :num-to-str number
-  | :num-hash number
-  | :str-hash
-  | :str-length
+  | :io-bind
 
 type number =
   | :nat'
@@ -238,6 +222,7 @@ local format-expr indent p expr =
             :num-hash _ -> "num-hash"
             :str-hash -> "str-hash"
             :str-length -> "str-length"
+            :io-pure -> "io-pure"
 
           op
             |> string.append " "
@@ -264,6 +249,7 @@ local format-expr indent p expr =
             :str-prepend -> "str-prepend"
             :str-split-at -> "str-split-at"
             :str-find -> "str-find"
+            :io-bind -> "io-bind"
 
           op
             |> string.append " "
@@ -272,20 +258,5 @@ local format-expr indent p expr =
             |> string.append (format-expr indent 0 rhs)
             |> string.prepend "("
             |> string.append ")"
-
-        :action action ->
-          match action
-            :pure expr ->
-              format-expr indent 0 expr
-                |> string.prepend "(pure "
-                |> string.append ")"
-            :bind (a, b) ->
-              ">>="
-                |> string.append " "
-                |> string.append (format-expr indent 0 a)
-                |> string.append " "
-                |> string.append (format-expr indent 0 b)
-                |> string.prepend "("
-                |> string.append ")"
 
     _ -> string.format expr
