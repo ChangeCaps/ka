@@ -36,12 +36,12 @@ lower program main =
       }
 
       let state, expr = lower-expr state env lambda
-      state, (var, expr) :: binds
+      state, (expr, var) :: binds
 
   let main = map.get main.unique env.vars
     |> assert-some "vars are always registered"
 
-  binds, main
+  :rec (binds, main), state.next-id
 
 local type state = {
   next-id: nat

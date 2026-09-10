@@ -7,17 +7,18 @@ type expr =
   | :lit lit
   | :lam (var, expr)
   | :app (expr, expr)
-  | :field (expr, field)
+  | :rec ([expr, var], expr)
   | :bind (expr, var, expr)
+  | :field (expr, field)
   | :case (expr, [alt, expr])
   | :cons cons
   | :prim prim
 
 type alt =
+  | :empty
+  | :cons (var, var)
   | :str' str
   | :variant (str, option var)
-  | :cons (var, var)
-  | :empty
   | :default
 
 type var = {
@@ -86,14 +87,8 @@ type number =
   | :int'
   | :real'
 
-is [var, expr] -> str
-format binds =
-  binds
-    |> map \var, expr.
-      format-expr 1 0 expr
-        |> string.prepend " =\n  "
-        |> string.prepend var.name
-    |> string.join "\n\n"
+is expr -> str
+format expr = format-expr 0 0 expr
 
 is nat -> nat -> expr -> str
 local format-expr indent p expr =
@@ -128,15 +123,21 @@ local format-expr indent p expr =
         |> string.append (format-expr indent 9 expr)
         |> paren (0)
 
-    :field (expr, field) ->
-      let field = match field
-        :name s -> s
-        :index n -> string.format n
+    :rec (binds, output) ->
+      let binds = binds
+        |> map \expr, var.
+          format-expr (indent + 1) 1 expr
+            |> string.prepend " = "
+            |> string.prepend var.name
+        |> string.join line
 
-      format-expr indent 10 expr
-        |> string.append "."
-        |> string.append field
-        |> paren 10
+      "letrec"
+        |> string.append line
+        |> string.append binds
+        |> string.append "\n"
+        |> string.append (string.repeat indent "  ")
+        |> string.append "in "
+        |> string.append (format-expr (indent + 1) 1 output)
 
     :bind (input, var, output) ->
       format-expr indent 1 input
@@ -146,6 +147,16 @@ local format-expr indent p expr =
         |> string.append line
         |> string.append (format-expr (indent + 1) 1 output)
         |> paren 0
+
+    :field (expr, field) ->
+      let field = match field
+        :name s -> s
+        :index n -> string.format n
+
+      format-expr indent 10 expr
+        |> string.append "."
+        |> string.append field
+        |> paren 10
 
     :case (scrutinee, alts) ->
       let alts = alts

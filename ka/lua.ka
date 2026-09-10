@@ -8,49 +8,30 @@ import "std:result" as result
 
 import "ka:ir"
 
-lua program main = do
-  let global = program
-    |> fold set.empty \global var, _.
-      set.insert var.id global
-
+lua program = do
   let state = {
-    global: global
+    lazy: set.empty
   }
 
-  let program = program
-    |> fold "" \program var, expr.
-      let body, expr = lua-expr state "" expr
+  let body, expr = lua-expr state "" program
 
-      program
-        |> string.append "\n--"
-        |> string.append var.name
-        |> string.append "\n"
-        |> string.append (lua-var var)
-        |> string.append " = lazy(function() "
-        |> string.append body
-        |> string.append " return "
-        |> string.append expr
-        |> string.append " end)"
-        |> string.append "\n"
-
-  let prelude <- fs.read "src/prelude.lua"
-
-  let program, main = lua-expr state program main
+  let prelude <- read "src/prelude.lua"
 
   do assert-ok prelude
-    |> string.append program
-    |> string.append main
+    |> string.append body
+    |> string.append " "
+    |> string.append expr
     |> string.append "()"
 
 local type state = {
-  global: set nat
+  lazy: set nat
 }
 
 is state -> str -> expr -> str, str
 local lua-expr state body expr =
   match expr
     :var var ->
-      match set.has var.id state.global
+      match set.has var.id state.lazy
         :true ->
           let expr = lua-var var
             |> string.append "()"
@@ -93,6 +74,60 @@ local lua-expr state body expr =
 
       body, expr
 
+    :rec (binds, out) ->
+      let body' = binds
+        |> map \_, var. lua-var var
+        |> string.join ", "
+        |> string.prepend " local "
+        |> string.prepend body
+
+      let state = binds
+        |> fold state \state expr, var.
+          match expr
+            :lam _ -> state
+            _ ->
+              state with {
+                lazy: set.insert var.id state.lazy
+              }
+
+      let body = binds
+        |> fold body \body expr, var.
+          match expr
+            :lam _ ->
+              let body, out = lua-expr state body expr
+
+              body
+                |> string.append " "
+                |> string.append (lua-var var)
+                |> string.append " = "
+                |> string.append out
+
+            _ ->
+              let b, out = lua-expr state "" expr
+
+              body
+                |> string.append " "
+                |> string.append (lua-var var)
+                |> string.append " = "
+                |> string.append "lazy(function() "
+                |> string.append b
+                |> string.append " return "
+                |> string.append out
+                |> string.append " end)"
+
+      lua-expr state body out
+
+    :bind (input, var, output) ->
+      let body, input = lua-expr state body input
+
+      let body = body
+        |> string.append " local "
+        |> string.append (lua-var var)
+        |> string.append " = "
+        |> string.append input
+
+      lua-expr state body output
+
     :field (expr, field) ->
       let body, expr = lua-expr state body expr
 
@@ -112,17 +147,6 @@ local lua-expr state body expr =
         |> string.append field
 
       body, expr
-
-    :bind (input, var, output) ->
-      let body, input = lua-expr state body input
-
-      let body = body
-        |> string.append " local "
-        |> string.append (lua-var var)
-        |> string.append " = "
-        |> string.append input
-
-      lua-expr state body output
 
     :case (scrutinee, arms) ->
       let body, scrutinee = lua-expr state body scrutinee
@@ -261,7 +285,7 @@ local lua-expr state body expr =
           match from
             :some from ->
               let body, from = lua-expr state body from
-              
+
               let expr = "with("
                 |> string.append from
                 |> string.append ", "

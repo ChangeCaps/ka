@@ -49,14 +49,14 @@ compile compiler main = do
     :some main -> do
       print-all ds
 
-      let ir, main = lower typechecked main
-      let ir = simplify ir
+      let ir, next-id = lower typechecked main
+      let ir = simplify ir next-id
 
       print (format ir)
 
-      let lua <- lua ir main
-
+      let lua <- lua ir
       fs.write "test.lua" lua
+
       do {}
     :none -> do
       println "could not find main"

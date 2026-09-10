@@ -115,6 +115,20 @@ local js-expr state body expr =
 
       body, expr
 
+    :rec (_, _) -> panic ""
+
+    :bind (input, var, output) ->
+      let body, input = js-expr state body input
+
+      let body = body
+        |> string.append " let "
+        |> string.append (js-var var)
+        |> string.append " = "
+        |> string.append input
+        |> string.append ";"
+
+      js-expr state body output
+
     :field (expr, field) ->
       let body, expr = js-expr state body expr
 
@@ -134,18 +148,6 @@ local js-expr state body expr =
         |> string.append field
 
       body, expr
-
-    :bind (input, var, output) ->
-      let body, input = js-expr state body input
-
-      let body = body
-        |> string.append " let "
-        |> string.append (js-var var)
-        |> string.append " = "
-        |> string.append input
-        |> string.append ";"
-
-      js-expr state body output
 
     :case (scrutinee, arms) ->
       let body, scrutinee = js-expr state body scrutinee
