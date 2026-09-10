@@ -13,28 +13,51 @@ use ka::{
     lex::Tokens,
     parse::{self, Parser},
 };
-use mlua::{Lua, state::JitOptions};
 
 #[derive(clap::Parser)]
-struct Args {
+enum Args {
+    Run(Run),
+    Lua(Lua),
+}
+
+#[derive(clap::Parser)]
+struct Run {
+    path: PathBuf,
+}
+
+#[derive(clap::Parser)]
+struct Lua {
     path: PathBuf,
 }
 
 fn main() -> io::Result<()> {
     let args = <Args as clap::Parser>::parse();
 
-    let name = args.path.file_stem().unwrap().to_string_lossy();
+    match args {
+        Args::Run(args) => {
+            let name = args.path.file_stem().unwrap().to_string_lossy();
 
-    let mut compiler = Compiler::new();
+            let mut compiler = Compiler::new();
 
-    let t = Instant::now();
+            let t = Instant::now();
 
-    compiler.add_package("std", "std")?;
-    compiler.add_package(&name, &args.path)?;
+            compiler.add_package("std", "std")?;
+            compiler.add_package(&name, &args.path)?;
 
-    eprintln!("parsing took: {:?}", t.elapsed());
+            eprintln!("parsing took: {:?}", t.elapsed());
 
-    compiler.run(&name);
+            compiler.run(&name);
+        }
+
+        Args::Lua(args) => {
+            let source = fs::read_to_string(&args.path)?;
+
+            let lua = Compiler::lua();
+            if let Err(e) = lua.load(source).exec() {
+                eprintln!("{e}");
+            }
+        }
+    }
 
     Ok(())
 }
@@ -59,6 +82,68 @@ impl Compiler {
             interner: Interner::new(),
             modules: Vec::new(),
         }
+    }
+
+    fn lua() -> mlua::Lua {
+        let lua = mlua::Lua::new();
+        lua.set_compiler(
+            mlua::chunk::Compiler::new()
+                .set_optimization_level(2)
+                .set_debug_level(0)
+                .set_type_info_level(1),
+        );
+
+        lua.set_jit_options(mlua::state::JitOptions::new().inliner(true));
+
+        let print = lua
+            .create_function(|_, path: String| {
+                let mut stdout = io::stdout();
+                let _ = stdout.write_all(path.as_bytes());
+                let _ = stdout.flush();
+
+                Ok(())
+            })
+            .unwrap();
+
+        let read = lua
+            .create_function(|_, path: String| match fs::read_to_string(path) {
+                Ok(contents) => Ok((contents, true)),
+                Err(_) => Ok((String::new(), false)),
+            })
+            .unwrap();
+
+        let write = lua
+            .create_function(|_, (path, contents): (String, String)| {
+                Ok(fs::write(path, contents).is_ok())
+            })
+            .unwrap();
+
+        let read_dir = lua
+            .create_function(|_, path: String| match fs::read_dir(path) {
+                Ok(entries) => {
+                    let entries = entries
+                        .flatten()
+                        .map(|entry| entry.path().to_string_lossy().to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    Ok((entries, true))
+                }
+                Err(_) => Ok((String::new(), false)),
+            })
+            .unwrap();
+
+        let is_dir = lua
+            .create_function(|_, path: String| Ok(Path::new(&path).is_dir()))
+            .unwrap();
+
+        lua.globals().set("print", print).unwrap();
+        lua.globals().set("read", read).unwrap();
+        lua.globals().set("write", write).unwrap();
+        lua.globals().set("readdir", read_dir).unwrap();
+        lua.globals().set("isdir", is_dir).unwrap();
+
+        lua
     }
 
     fn run(mut self, main_package: &str) {
@@ -90,58 +175,7 @@ impl Compiler {
         if let Some(main) = main {
             let source = ka::lua::codegen(&program, main);
 
-            let lua = Lua::new();
-
-            lua.set_jit_options(JitOptions::new().inliner(true));
-
-            let print = lua
-                .create_function(|_, path: String| {
-                    let mut stdout = io::stdout();
-                    let _ = stdout.write_all(path.as_bytes());
-                    let _ = stdout.flush();
-
-                    Ok(())
-                })
-                .unwrap();
-
-            let read = lua
-                .create_function(|_, path: String| match fs::read_to_string(path) {
-                    Ok(contents) => Ok((contents, true)),
-                    Err(_) => Ok((String::new(), false)),
-                })
-                .unwrap();
-
-            let write = lua
-                .create_function(|_, (path, contents): (String, String)| {
-                    Ok(fs::write(path, contents).is_ok())
-                })
-                .unwrap();
-
-            let read_dir = lua
-                .create_function(|_, path: String| match fs::read_dir(path) {
-                    Ok(entries) => {
-                        let entries = entries
-                            .flatten()
-                            .map(|entry| entry.path().to_string_lossy().to_string())
-                            .collect::<Vec<_>>()
-                            .join("\n");
-
-                        Ok((entries, true))
-                    }
-                    Err(_) => Ok((String::new(), false)),
-                })
-                .unwrap();
-
-            let is_dir = lua
-                .create_function(|_, path: String| Ok(Path::new(&path).is_dir()))
-                .unwrap();
-
-            lua.globals().set("print", print).unwrap();
-            lua.globals().set("read", read).unwrap();
-            lua.globals().set("write", write).unwrap();
-            lua.globals().set("readdir", read_dir).unwrap();
-            lua.globals().set("isdir", is_dir).unwrap();
-
+            let lua = Self::lua();
             if let Err(e) = lua.load(source).exec() {
                 eprintln!("{e}");
             }

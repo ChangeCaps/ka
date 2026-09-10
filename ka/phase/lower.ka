@@ -5,6 +5,8 @@ import "std:debug"  as debug
 import "std:list"   as list
 import "std:map"    as map
 
+import "ka:diagnostic/span" as span
+import "ka:phase/rename"    as rename
 import "ka:phase/typecheck" as typecheck
 import "ka:ast"             as ast
 import "ka:ir"              as ir
@@ -182,7 +184,10 @@ local lower-expr state env expr =
           ]
 
           state, :case (input, alts)
-        op -> panic (string.format op)
+
+        :nat' -> state, :prim :unary (:num-cast :nat', input)
+        :int' -> state, :prim :unary (:num-cast :int', input)
+        :real' -> state, :prim :unary (:num-cast :real', input)
 
     :binary expr ->
       let state, lhs = lower-expr state env expr.lhs
@@ -228,8 +233,6 @@ local lower-expr state env expr =
         :ne -> :prim :binary (:ne, lhs, rhs)
 
         :cons -> :cons :cons (lhs, rhs)
-
-        op -> panic (string.format op)
 
       state, expr
 
@@ -290,7 +293,7 @@ local lower-let state env stmt output =
 
   let state, input = lower-expr state env lambda
 
-  let state, var = add-var state :none
+  let state, var = add-var state (pat-name stmt.pat)
   let state, expr = lower-case state env [:var var] [[stmt.pat], output]
 
   state, :bind (input, var, expr)
@@ -354,40 +357,46 @@ local lower-case state env scrutinees arms =
         |> assert-some "must always have at least one scrutinee"
 
       let list' arms =
-        let cons, empty, wild = arms
-          |> list.rfold ([], [], []) \cons, empty, wild pats, expr.
+        let env, cons, empty = arms
+          |> list.rfold ( env, [], []) \env, cons, empty pats, expr.
             let head, tail = pop pats
 
             match head
               :cons pat ->
                 let cons = (pat.first :: pat.rest :: tail, expr) :: cons
-                cons, empty, wild
+                env, cons, empty
 
               :empty _ ->
                 let empty = (tail, expr) :: empty
-                cons, empty, wild
+                env, cons, empty
 
-              :bind _ -> cons, empty, (pats, expr) :: wild
-              :wild _ -> cons, empty, (pats, expr) :: wild
+              :bind pat ->
+                let env = env with {
+                  vars: map.insert pat.name.unique scrutinee env.vars
+                }
+
+                let wild = :wild {
+                  span: pat.span
+                }
+
+                let cons = (wild :: wild :: tail, expr) :: cons
+                let empty = (tail, expr) :: empty
+
+                env, cons, empty
+
+              :wild _ ->
+                let cons = (head :: head :: tail, expr) :: cons
+                let empty = (tail, expr) :: empty
+
+                env, cons, empty
 
               _ -> panic (string.format head)
 
-        let state, alts = match wild
+        let state, alts = match empty
           [] -> state, []
           _ ->
-            let state, var = add-var state :none
-
-            let scrutinees = scrutinee :: scrutinees
-            let state, expr = lower-case state env scrutinees wild
-
-            state, [(:default, expr)]
-
-        let state, alts = match empty
-          [] -> state, alts
-          _ ->
             let state, expr = lower-case state env scrutinees empty
-
-            state, (:empty, expr) :: alts
+            state, [:empty, expr]
 
         let state, alts = match cons
           [] -> state, alts
@@ -416,7 +425,7 @@ local lower-case state env scrutinees arms =
                 }
               _ -> panic (string.format head)
 
-            env, (tail, expr) :: arms 
+            env, (tail, expr) :: arms
 
         lower-case state env scrutinees arms
 
@@ -428,25 +437,83 @@ local lower-case state env scrutinees arms =
             |> list.map \n. :field (scrutinee, :index n)
             |> list.append scrutinees
 
-          let arms = arms
-            |> list.map \pats, expr.
+          let env, arms = arms
+            |> list.rfold (env, []) \env, arms pats, expr.
               let head, tail = list.pop pats
                 |> assert-some "arms aren't empty"
 
-              let pats = match head
-                :tuple pat -> pat.fields
+              let env, pats = match head
+                :tuple pat -> env, pat.fields
+
+                :bind pat ->
+                  let env = env with {
+                    vars: map.insert pat.name.unique scrutinee env.vars
+                  }
+
+                  let wild = :wild {
+                    span: pat.span
+                  }
+
+                  env, list.repeat arity wild
+
+                :wild _ -> env, list.repeat arity head
+
                 _ -> panic (string.format head)
 
-              list.prepend pats tail, expr
+              let pats = list.prepend pats tail
+
+              env, (pats, expr) :: arms
 
           lower-case state env scrutinees arms
+
+        :str' _ ->
+          let env, strings, wild = arms
+            |> list.rfold (env, map.empty, []) \env, strings, wild pats, expr.
+              let head, tail = pop pats
+
+              match head
+                :str' pat ->
+                  let arms = map.get pat.value strings
+                    |> some-or []
+                    |> list.push (tail, expr)
+
+                  let strings = map.insert pat.value arms strings
+                  env, strings, wild
+
+                :bind pat ->
+                  let env = env with {
+                    vars: map.insert pat.name.unique scrutinee env.vars
+                  }
+
+                  env, strings, (tail, expr) :: wild
+
+                :wild _ -> env, strings, (tail, expr) :: wild
+
+                _ -> panic (string.format head)
+
+          let state, alts = match wild
+            [] -> state, []
+            _ ->
+              let state, var = add-var state :none
+              let scrutinees = scrutinees
+              let state, expr = lower-case state env scrutinees wild
+              state, [(:default, expr)]
+
+          let state, alts = strings
+            |> map.pairs
+            |> list.rfold (state, alts) \state, alts s, arms.
+              let arms = list.append wild arms
+              let state, expr = lower-case state env scrutinees arms
+              state, (:str' s, expr) :: alts
+
+          state, :case (scrutinee, alts)
 
         :empty _ -> list' arms
         :cons _ -> list' arms
 
         :variant _ ->
-          let variants, wild = arms
-            |> list.rfold (map.empty, []) \variants, wild pats, expr.
+          let env, variants, wild = arms
+            |> list.rfold (env, map.empty, []) \env, variants, wild pats, expr.
               let head, tail = pop pats
 
               match head
@@ -459,11 +526,18 @@ local lower-case state env scrutinees arms =
                     |> some-or (is-some variant.payload, [])
 
                   let arms = (tail, expr) :: arms
+                  let variants = map.insert variant.name (payload, arms) variants
 
-                  map.insert variant.name (payload, arms) variants, wild
+                  env, variants, wild
 
-                :wild _ -> variants, (pats, expr) :: wild
-                :bind _ -> variants, (pats, expr) :: wild
+                :bind pat ->
+                  let env = env with {
+                    vars: map.insert pat.name.unique scrutinee env.vars
+                  }
+
+                  env, variants, (tail, expr) :: wild
+
+                :wild _ -> env, variants, (tail, expr) :: wild
 
                 _ -> panic (string.format head)
 
@@ -471,7 +545,7 @@ local lower-case state env scrutinees arms =
             [] -> state, []
             _ ->
               let state, var = add-var state :none
-              let scrutinees = scrutinee :: scrutinees
+              let scrutinees = scrutinees
               let state, expr = lower-case state env scrutinees wild
               state, [(:default, expr)]
 
@@ -484,6 +558,11 @@ local lower-case state env scrutinees arms =
                   state, :var var :: scrutinees, :some var
                 :false -> state, scrutinees, :none
 
+              let wild = match payload
+                :some _ -> wild |> list.map \pats, expr. :wild { span: span.dummy } :: pats, expr
+                :none -> wild
+
+              let arms = list.append wild arms
               let state, expr = lower-case state env scrutinees arms
               state, (:variant (name, payload), expr) :: alts
 
@@ -492,7 +571,7 @@ local lower-case state env scrutinees arms =
         :bind _ -> bind arms
         :wild _ -> bind arms
 
-        _ -> panic (string.format pat)
+        _ -> panic "error pattern"
 
 is state -> option str -> state, var
 local add-var state name =

@@ -8,36 +8,57 @@ import "std:result" as result
 
 import "ka:ir"
 
-lua program main = do
+js program main = do
   let global = program
-    |> fold set.empty \global var, _.
-      set.insert var.id global
+    |> fold set.empty \global var, expr.
+      match expr
+        :lam _ -> global
+        _ -> set.insert var.id global
 
   let state = {
     global: global
   }
 
+  let defines = program
+    |> map \var, _.
+      js-var var
+        |> string.prepend "let "
+        |> string.append ";"
+    |> join ""
+
   let program = program
     |> fold "" \program var, expr.
-      let body, expr = lua-expr state "" expr
+      let body = match expr
+        :lam _ ->
+          let _, expr = js-expr state "" expr
+          expr
+
+        _ ->
+          let body, expr = js-expr state "" expr
+
+          "() => {"
+            |> string.append body
+            |> string.append "return "
+            |> string.append expr
+            |> string.append ";}"
 
       program
-        |> string.append "\n--"
+        |> string.append "\n// "
         |> string.append var.name
         |> string.append "\n"
-        |> string.append (lua-var var)
-        |> string.append " = lazy(function() "
+        |> string.append (js-var var)
+        |> string.append " = "
         |> string.append body
-        |> string.append " return "
-        |> string.append expr
-        |> string.append " end)"
         |> string.append "\n"
 
-  let prelude <- fs.read "src/prelude.lua"
+  let prelude <- fs.read "prelude.js"
 
-  let program, main = lua-expr state program main
+  let program, main = js-expr state program main
 
-  do assert-ok prelude
+  do "#!/usr/bin/env node\n"
+    |> string.append (assert-ok prelude)
+    |> string.append defines
+    |> string.append "\n"
     |> string.append program
     |> string.append main
     |> string.append "()"
@@ -47,20 +68,20 @@ local type state = {
 }
 
 is state -> str -> expr -> str, str
-local lua-expr state body expr =
+local js-expr state body expr =
   match expr
     :var var ->
       match set.has var.id state.global
         :true ->
-          let expr = lua-var var
+          let expr = js-var var
             |> string.append "()"
 
           body, expr
-        :false -> body, lua-var var
+        :false -> body, js-var var
 
     :lit lit ->
       let lit = match lit
-        :str' s -> lua-str s
+        :str' s -> js-str s
         :nat' x -> string.format x
         :int' x -> string.format x
         :real' x -> string.format x
@@ -69,21 +90,22 @@ local lua-expr state body expr =
 
     :lam (var, expr) ->
       let expr =
-        let body, expr = lua-expr state "" expr
+        let body, expr = js-expr state "" expr
 
-        "function("
-          |> string.append (lua-var var)
-          |> string.append ")"
+        "("
+          |> string.append (js-var var)
+          |> string.append ") => {"
           |> string.append body
           |> string.append " return "
           |> string.append expr
-          |> string.append " end"
+          |> string.append ";"
+          |> string.append "}"
 
       body, expr
 
     :app (lambda, input) ->
-      let body, lambda = lua-expr state body lambda
-      let body, input = lua-expr state body input
+      let body, lambda = js-expr state body lambda
+      let body, input = js-expr state body input
 
       let expr = lambda
         |> string.prepend "("
@@ -94,14 +116,14 @@ local lua-expr state body expr =
       body, expr
 
     :field (expr, field) ->
-      let body, expr = lua-expr state body expr
+      let body, expr = js-expr state body expr
 
       let field = match field
         :name s -> s
           |> string.prepend "[\""
           |> string.append "\"]"
 
-        :index n -> n + 1
+        :index n -> n
           |> string.format
           |> string.prepend "["
           |> string.append "]"
@@ -114,82 +136,108 @@ local lua-expr state body expr =
       body, expr
 
     :bind (input, var, output) ->
-      let body, input = lua-expr state body input
+      let body, input = js-expr state body input
 
       let body = body
-        |> string.append " local "
-        |> string.append (lua-var var)
+        |> string.append " let "
+        |> string.append (js-var var)
         |> string.append " = "
         |> string.append input
+        |> string.append ";"
 
-      lua-expr state body output
+      js-expr state body output
 
     :case (scrutinee, arms) ->
-      let body, scrutinee = lua-expr state body scrutinee
+      let body, scrutinee = js-expr state body scrutinee
 
-      let result = "result"
+      let result = "r"
         |> string.append (string.format (hash scrutinee))
 
+      let switched = match list.first arms
+        :some (:variant _, _) -> "true"
+        :some (:cons _, _) -> string.prepend scrutinee ".head != null"
+        :some (:empty, _) -> string.prepend scrutinee ".head != null"
+        _ -> scrutinee
+
       let body = body
-        |> string.append " local scrutinee = "
-        |> string.append scrutinee
-        |> string.append " local "
+        |> string.append " let "
         |> string.append result
-        |> string.append " if false then"
+        |> string.append "; switch ("
+        |> string.append switched
+        |> string.append ") {"
 
       let body = arms
         |> fold body \body alt, expr.
-          let inner, condition = match alt
+          let inner, case = match alt
             :str' s ->
-              let condition = "scrutinee == "
-                |> string.append (lua-str s)
+              let case = "case "
+                |> string.append (js-str s)
+                |> string.append ":"
 
-              "", condition
+              "", case
 
-            :variant ("true", :none) -> "", "scrutinee == true"
-            :variant ("false", :none) -> "", "scrutinee == false"
+            :variant ("true", :none) ->
+              let case = "case "
+                |> string.append scrutinee
+                |> string.append ":"
+
+              "", case
+
+            :variant ("false", :none) ->
+              let case = "case !("
+                |> string.append scrutinee
+                |> string.append "):"
+
+              "", case
 
             :variant (name, payload) ->
               let inner = match payload
                 :some payload ->
-                  " local "
-                    |> string.append (lua-var payload)
-                    |> string.append " = scrutinee[\"$payload\"]"
+                  " let "
+                    |> string.append (js-var payload)
+                    |> string.append " = "
+                    |> string.append scrutinee
+                    |> string.append ".payload;"
                 :none -> ""
 
-              let condition = "scrutinee[\"$variant\"] == "
-                |> string.append "\""
+              let case = "case "
+                |> string.append scrutinee
+                |> string.append ".name == \""
                 |> string.append name
-                |> string.append "\""
+                |> string.append "\":"
 
-              inner, condition
+              inner, case
 
             :cons (head, tail) ->
-              let inner = " local "
-                |> string.append (lua-var head)
-                |> string.append " = scrutinee[\"$item\"]"
-                |> string.append " local "
-                |> string.append (lua-var tail)
-                |> string.append " = scrutinee[\"$rest\"]"
+              let inner = " let "
+                |> string.append (js-var head)
+                |> string.append " = "
+                |> string.append scrutinee
+                |> string.append ".head;"
+                |> string.append " let "
+                |> string.append (js-var tail)
+                |> string.append " = "
+                |> string.append scrutinee
+                |> string.append ".tail;"
 
-              inner, "not scrutinee[\"$empty\"]"
+              inner, "case true:"
 
-            :empty -> "", "scrutinee[\"$empty\"]"
+            :empty -> "", "case false:"
 
-            :default -> "", "true"
+            :default -> "", "default:"
 
-          let inner, expr = lua-expr state inner expr
+          let inner, expr = js-expr state inner expr
 
           body
-            |> string.append " elseif "
-            |> string.append condition
-            |> string.append " then"
+            |> string.append case
+            |> string.append "{"
             |> string.append inner
             |> string.append " "
             |> string.append result
             |> string.append " = "
             |> string.append expr
-        |> string.append " else panic(\"not arm reached\") end"
+            |> string.append "; break; }"
+        |> string.append "}"
 
       body, result
 
@@ -198,10 +246,12 @@ local lua-expr state body expr =
         :variant ("true", :none) -> body, "true"
         :variant ("false", :none) -> body, "false"
 
-        :variant (name, :some payload) ->
-          let body, payload = lua-expr state body payload
+        :variant (name, payload) ->
+          let body, payload = match payload
+            :some payload -> js-expr state body payload
+            :none -> body, "null"
 
-          let expr = "variant(\""
+          let expr = "new Variant(\""
             |> string.append name
             |> string.append "\", "
             |> string.append payload
@@ -209,20 +259,13 @@ local lua-expr state body expr =
 
           body, expr
 
-        :variant (name, :none) ->
-          let expr = "variant(\""
-            |> string.append name
-            |> string.append "\")"
-
-          body, expr
-
-        :empty -> body, "empty"
+        :empty -> body, "List.empty"
 
         :cons (head, tail) ->
-          let body, head = lua-expr state body head
-          let body, tail = lua-expr state body tail
+          let body, head = js-expr state body head
+          let body, tail = js-expr state body tail
 
-          let expr = "cons("
+          let expr = "new List("
             |> string.append head
             |> string.append ", "
             |> string.append tail
@@ -233,23 +276,23 @@ local lua-expr state body expr =
         :tuple fields ->
           let body, fields = fields
             |> fold (body, []) \body, fields field.
-              let body, field = lua-expr state body field
+              let body, field = js-expr state body field
               body, list.append [field] fields
 
-          let expr = "{ "
+          let expr = "["
             |> string.append (string.join ", " fields)
-            |> string.append " }"
+            |> string.append "]"
 
           body, expr
 
         :record (from, fields) ->
           let body, fields = fields
             |> fold (body, []) \body, fields name, expr.
-              let body, expr = lua-expr state body expr
+              let body, expr = js-expr state body expr
 
-              let field = "[\""
+              let field = "\""
                 |> string.append name
-                |> string.append "\"] = "
+                |> string.append "\": "
                 |> string.append expr
 
               body, list.append [field] fields
@@ -260,9 +303,9 @@ local lua-expr state body expr =
 
           match from
             :some from ->
-              let body, from = lua-expr state body from
-              
-              let expr = "with("
+              let body, from = js-expr state body from
+
+              let expr = "withFields("
                 |> string.append from
                 |> string.append ", "
                 |> string.append expr
@@ -284,7 +327,7 @@ local lua-expr state body expr =
           body, expr
 
         :unary (op, expr) ->
-          let body, expr = lua-expr state body expr
+          let body, expr = js-expr state body expr
 
           let call f =
             let expr = f
@@ -298,18 +341,18 @@ local lua-expr state body expr =
             :dynamic -> call "dynamic"
             :panic -> call "panic"
 
-            :num-to-str _ -> call "tostring"
-            :num-hash _ -> call "hashnum"
-            :num-cast _ -> call "numcast"
+            :num-to-str _ -> call "String"
+            :num-hash _ -> call "numberHash"
+            :num-cast _ -> body, expr
 
-            :str-hash -> call "hashstr"
-            :str-length -> call "strlength"
+            :str-hash -> call "stringHash"
+            :str-length -> call "stringLength"
 
             :io-pure -> call "pure"
 
         :binary (op, lhs, rhs) ->
-          let body, lhs = lua-expr state body lhs
-          let body, rhs = lua-expr state body rhs
+          let body, lhs = js-expr state body lhs
+          let body, rhs = js-expr state body rhs
 
           let call f =
             let expr = f
@@ -341,23 +384,23 @@ local lua-expr state body expr =
             :lt _ -> binary "<"
             :ge _ -> binary ">="
             :le _ -> binary "<="
-            :land -> binary "and"
-            :lor -> binary "or"
+            :land -> binary "&&"
+            :lor -> binary "||"
 
-            :eq -> call "eq"
-            :ne -> call "ne"
+            :eq -> call "isDeepStrictEqual"
+            :ne -> call "!isDeepStrictEqual"
 
             :trace -> call "trace"
 
-            :nat-xor -> call "bit32.bxor"
+            :nat-xor -> binary "^"
 
-            :str-prepend -> binary ".."
-            :str-split-at -> call "strsplitat"
-            :str-find -> call "strfind"
+            :str-prepend -> binary "+"
+            :str-split-at -> call "stringSplit"
+            :str-find -> call "stringFind"
 
             :io-bind -> call "bind"
 
-local lua-str s =
+local js-str s =
   s |> string.replace "\\" "\\\\"
     |> string.replace "\"" "\\\""
     |> string.replace "\n" "\\n"
@@ -367,6 +410,6 @@ local lua-str s =
     |> string.prepend "\""
     |> string.append "\""
 
-local lua-var var =
+local js-var var =
   string.format var.id
     |> string.prepend "v"

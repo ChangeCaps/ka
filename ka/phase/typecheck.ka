@@ -1303,6 +1303,22 @@ local unify-ty-ty state lhs rhs prov =
   let state, lhs = normalize state lhs
   let state, rhs = normalize state rhs
 
+
+  let mismatched state =
+    let span = primary-span prov
+
+    let msg = "expected `"
+      |> string.append (format state lhs)
+      |> string.append "`, found `"
+      |> string.append (format state rhs)
+      |> string.append "`"
+
+    "mismatched types"
+      |> error
+      |> label span msg
+      |> explain prov
+      |> report state
+
   match lhs, rhs
     lhs, :var var -> unify-ty-var state lhs var prov :left
     :var var, rhs -> unify-ty-var state rhs var prov :right
@@ -1344,37 +1360,32 @@ local unify-ty-ty state lhs rhs prov =
             |> report state
 
     :union lhs-vars, :union rhs-vars ->
-      let state = lhs-vars
-        |> list.fold state \state lhs.
-          unify-variant state rhs lhs prov :right
+      let state, success = lhs-vars
+        |> list.fold (state, :true) \state, success lhs.
+          match rhs-vars |> list.find \rhs. rhs.name == lhs.name
+            :some rhs ->
+              match lhs.payload, rhs.payload
+                :some lhs, :some rhs -> unify state lhs rhs prov, success
+                :none, :none -> state, success
+                _, _ -> state, :false
+            :none -> state, :false
 
-      rhs-vars
-        |> list.fold state \state rhs.
-          unify-variant state lhs rhs prov :left
+      match success
+        :true -> state
+        :false -> mismatched state
 
     :record lhs-fields, :record rhs-fields ->
-      let state = lhs-fields
-        |> list.fold state \state lhs.
-          unify-field state rhs lhs prov :right
+      let state, success = lhs-fields
+        |> list.fold (state, :true) \state, success lhs.
+          match rhs-fields |> list.find \rhs. rhs.name == lhs.name
+            :some rhs -> unify state lhs.ty rhs.ty prov, success
+            :none -> state, :false
 
-      rhs-fields
-        |> list.fold state \state rhs.
-          unify-field state lhs rhs prov :left
+      match success
+        :true -> state
+        :false -> mismatched state
 
-    lhs, rhs ->
-      let span = primary-span prov
-
-      let msg = "expected `"
-        |> string.append (format state lhs)
-        |> string.append "`, found `"
-        |> string.append (format state rhs)
-        |> string.append "`"
-
-      "mismatched types"
-        |> error
-        |> label span msg
-        |> explain prov
-        |> report state
+    lhs, rhs -> mismatched state
 
 local unify-ty-var state ty var prov side =
   let state = match bound state var

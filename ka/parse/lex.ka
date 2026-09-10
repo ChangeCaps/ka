@@ -276,8 +276,8 @@ local is-alphabetic c = contains c alphabet
 local is-whitespace c = c == " "
 local is-newline c = "\n"
 
-local is-ident-start c = is-alphabetic c
-local is-ident-continue c = is-ident-start c or is-digit c or c == "-" or c == "'"
+local is-ident-start c = is-alphabetic c or c == "_"
+local is-ident-continue c = is-ident-start c or is-digit c or c == "-" or c == "'" or c == "_"
 
 local symbols s = match s
   "::" -> :some (:colon-colon)
@@ -332,4 +332,5 @@ local keywords s = match s
   "str"    -> :some (:str')
   "type"   -> :some (:type')
   "with"   -> :some (:with')
+  "_"      -> :some (:under)
   _        -> :none

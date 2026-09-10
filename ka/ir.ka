@@ -14,6 +14,7 @@ type expr =
   | :prim prim
 
 type alt =
+  | :str' str
   | :variant (str, option var)
   | :cons (var, var)
   | :empty
@@ -55,6 +56,7 @@ type unary =
   | :panic
   | :num-to-str number
   | :num-hash number
+  | :num-cast number
   | :str-hash
   | :str-length
   | :io-pure
@@ -124,7 +126,7 @@ local format-expr indent p expr =
       format-expr indent 10 lam
         |> string.append " "
         |> string.append (format-expr indent 9 expr)
-        |> paren (9)
+        |> paren (0)
 
     :field (expr, field) ->
       let field = match field
@@ -149,6 +151,8 @@ local format-expr indent p expr =
       let alts = alts
         |> map \alt, expr.
           let alt = match alt
+            :str' s -> string.format s
+
             :variant (name, payload) ->
               let payload = payload
                 |> map-some \var. var.name |> string.prepend " "
@@ -230,6 +234,7 @@ local format-expr indent p expr =
             :panic -> "panic"
             :num-to-str _ -> "num-to-str"
             :num-hash _ -> "num-hash"
+            :num-cast _ -> "num-cast"
             :str-hash -> "str-hash"
             :str-length -> "str-length"
             :io-pure -> "io-pure"

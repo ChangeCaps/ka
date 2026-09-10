@@ -226,6 +226,8 @@ local add-intrinsic state =
   }
 
 local prelude = [
+  "std:io",     "io"
+  "std:fs",     "fs"
   "std:set",    "set"
   "std:map",    "map"
   "std:string", "string"

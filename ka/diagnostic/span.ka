@@ -5,3 +5,11 @@ type span = {
   start: nat
   len:   nat
 }
+
+dummy = {
+  file: {
+    path: "dummy"
+  }
+  start: 0
+  len:   0
+}

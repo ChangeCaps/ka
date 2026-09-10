@@ -9,29 +9,50 @@ import "std:assert" as assert
 import "ka:ir"
 
 simplify program =
+  let globals = program
+    |> fold map.empty \globals var, expr.
+      map.insert var.id expr globals
+
   let env = {
-    vars: map.empty
-    subst: set.empty
+    vars:    map.empty
+    globals: globals
   }
 
-  let env = program
-    |> fold env \env var, expr.
-      match uses var expr > 0
-        :true -> remove-var var env
-        :false -> env
+  let state = {
+    next-id: 10000000
+    inline:  map.empty
+  }
 
   program |> list.map \var, expr.
-    var, simplify-expr env expr
+    let _, expr = simplify-expr state env expr
+    var, expr
 
 local type env = {
-  vars: map nat expr
-  subst: set (var, expr)
+  vars:    map nat expr
+  globals: map nat expr
 }
 
-local add-var var expr env =
+local type state = {
+  next-id: nat
+  inline:  map nat nat
+}
+
+local subst-var var expr env =
   env with {
     vars: map.insert var.id expr env.vars
   }
+
+local add-var state =
+  let var = {
+    name: string.prepend "_" (string.format state.next-id)
+    id:   state.next-id
+  }
+
+  let state = state with {
+    next-id: state.next-id + 1
+  }
+
+  state, var
 
 local remove-var var env =
   env with {
@@ -41,73 +62,95 @@ local remove-var var env =
 local get-var var env =
   map.get var.id env.vars
 
-local has-var var env =
-  map.has var.id env.vars
+local get-global var env =
+  map.get var.id env.globals
 
-local add-subst var expr env =
-  env with {
-    subst: set.insert (var, expr) env.subst
+local add-inline var state =
+  let n = get-inline var state + 1
+
+  state with {
+    inline: map.insert var.id n state.inline
   }
 
-local has-subst var expr env =
-  set.has (var, expr) env.subst
+local get-inline var state =
+  map.get var.id state.inline |> some-or 0
 
-is env -> expr -> expr
-local simplify-expr env expr =
+is state -> env -> expr -> state, expr
+local simplify-expr state env expr =
   match expr
     :var var ->
-      get-var var env
+      let expr = get-var var env
         |> some-or expr
 
-    :lit _ -> expr
+      state, expr
 
-    :lam (var, output) ->
-      let output = simplify-expr env output
-      :lam (var, output)
+    :lit lit -> state, :lit lit
 
-    :app (lambda, input) ->
-      let lambda = simplify-expr env lambda
-      let input = simplify-expr env input
+    :lam (var, out) ->
+      let state, out = simplify-expr state env out
+      state, :lam (var, out)
 
-      match lambda
-        :lam (var, output) ->
-          let env = add-subst var input env
-          let env = add-var var input env
-          simplify-expr env output
+    :app (lam, in) ->
+      let state, lam = simplify-expr state env lam
+      let state, in = simplify-expr state env in
 
-        _ -> :app (lambda, input)
+      let app = :app (lam, in)
+
+      match lam
+        :var global -> match get-global global env
+          :some expr -> match expr
+            :lam (_, out) -> match should-inline state env global out
+              :true ->
+                let state = add-inline global state
+                let app = :app (expr, in)
+                simplify-expr state env app
+              :false -> state, app
+
+            _ -> state, app
+          :none -> state, app
+
+        :lam (var, out) ->
+          let state, var = add-var state
+          let expr = :bind (in, var, out)
+          simplify-expr state env expr
+
+        _ -> state, app
 
     :field (expr, field) ->
-      let expr = simplify-expr env expr
+      let state, expr = simplify-expr state env expr
 
       match expr
         :cons cons ->
           match cons, field
             :tuple fields, :index n ->
-              nth n fields |> assert-some ""
+              let field = nth n fields
+                |> assert-some "invalid number of tuple fields"
 
-            _ -> :field (expr, field)
-        _ -> :field (expr, field)
+              state, field
 
-    :bind (input, var, output) ->
-      let uses = uses var output
+            _ -> state, :field (expr, field)
+        _ -> state, :field (expr, field)
+
+    :bind (in, var, out) ->
+      let state, out = simplify-expr state env out
+      let uses = uses var out
 
       match uses == 0
-        :true -> simplify-expr env output
+        :true -> state, out
         :false ->
-          let input = simplify-expr env input
+          let state, in = simplify-expr state env in
+          let cost = cost in * uses
 
-          match uses == 1
+          match cost < 50
             :true ->
-              let env = add-var var input env
-              simplify-expr env output
+              let env = subst-var var in env
+              simplify-expr state env out
 
             :false ->
-              let output = simplify-expr env output
-              :bind (input, var, output)
+              state, :bind (in, var, out)
 
     :case (scrutinee, arms) ->
-      let scrutinee = simplify-expr env scrutinee
+      let state, scrutinee = simplify-expr state env scrutinee
 
       match scrutinee
         :cons cons ->
@@ -128,82 +171,172 @@ local simplify-expr env expr =
                 _, :default -> :some expr
                 _, _ -> :none
             |> assert-some "cons should always match one arm"
-            |> simplify-expr env
+            |> simplify-expr state env
 
         _ ->
-          let arms = arms
-            |> map \alt, expr.
-              alt, simplify-expr env expr
+          let state, arms = arms
+            |> rfold (state, []) \state, arms alt, expr.
+              let state, expr = simplify-expr state env expr
+              state, (alt, expr) :: arms
 
-          :case (scrutinee, arms)
+          state, :case (scrutinee, arms)
 
     :cons cons ->
-      let cons = match cons
-        :empty -> :empty
+      let state, cons = match cons
+        :empty -> state, :empty
 
         :cons (head, tail) ->
-          let head = simplify-expr env head
-          let tail = simplify-expr env tail
-          :cons (head, tail)
+          let state, head = simplify-expr state env head
+          let state, tail = simplify-expr state env tail
+          state, :cons (head, tail)
 
         :variant (name, payload) ->
-          let payload = payload
-            |> map-some (simplify-expr env)
+          let state, payload = match payload
+            :some payload ->
+              let state, payload = simplify-expr state env payload
+              state, :some payload
+            :none -> state, :none
 
-          :variant (name, payload)
+          state, :variant (name, payload)
 
         :record (from, fields) ->
-          let from = from
-            |> map-some (simplify-expr env)
+          let state, from = match from
+            :some from ->
+              let state, from = simplify-expr state env from
+              state, :some from
+            :none -> state, :none
 
-          let fields = fields
-            |> map \name, expr.
-              name, simplify-expr env expr
+          let state, fields = fields
+            |> rfold (state, []) \state, fields name, expr.
+              let state, expr = simplify-expr state env expr
+              state, (name, expr) :: fields
 
-          :record (from, fields)
+          state, :record (from, fields)
 
         :tuple fields ->
-          let fields = fields
-            |> map (simplify-expr env)
+          let state, fields = fields
+            |> rfold (state, []) \state, fields field.
+              let state, field = simplify-expr state env field
+              state, field :: fields
 
-          :tuple fields
+          state, :tuple fields
 
-      :cons cons
+      state, :cons cons
 
     :prim prim ->
       match prim
-        :extern' extern' -> :prim :extern' extern'
+        :extern' extern' -> state, :prim :extern' extern'
 
         :unary (op, expr) ->
-          let expr = simplify-expr env expr
-          :prim :unary (op, expr)
+          let state, expr = simplify-expr state env expr
+          state, :prim :unary (op, expr)
 
         :binary (op, lhs, rhs) ->
-          let lhs = simplify-expr env lhs
-          let rhs = simplify-expr env rhs
+          let state, lhs = simplify-expr state env lhs
+          let state, rhs = simplify-expr state env rhs
 
           match lhs, rhs
             :lit lhs, :lit rhs ->
               let lit = match op, lhs, rhs
-                :add _, :nat' lhs, :nat' rhs -> :nat' (lhs + rhs)
-                :add _, :int' lhs, :int' rhs -> :int' (lhs + rhs)
-                :add _, :real' lhs, :real' rhs -> :real' (lhs + rhs)
+                :add _, :nat' lhs, :nat' rhs -> :some :nat' (lhs + rhs)
+                :add _, :int' lhs, :int' rhs -> :some :int' (lhs + rhs)
+                :add _, :real' lhs, :real' rhs -> :some :real' (lhs + rhs)
 
-                :sub _, :nat' lhs, :nat' rhs -> :nat' (lhs - rhs)
-                :sub _, :int' lhs, :int' rhs -> :int' (lhs - rhs)
-                :sub _, :real' lhs, :real' rhs -> :real' (lhs - rhs)
+                :sub _, :nat' lhs, :nat' rhs -> :some :nat' (lhs - rhs)
+                :sub _, :int' lhs, :int' rhs -> :some :int' (lhs - rhs)
+                :sub _, :real' lhs, :real' rhs -> :some :real' (lhs - rhs)
 
-                :mul _, :nat' lhs, :nat' rhs -> :nat' (lhs * rhs)
-                :mul _, :int' lhs, :int' rhs -> :int' (lhs * rhs)
-                :mul _, :real' lhs, :real' rhs -> :real' (lhs * rhs)
+                :mul _, :nat' lhs, :nat' rhs -> :some :nat' (lhs * rhs)
+                :mul _, :int' lhs, :int' rhs -> :some :int' (lhs * rhs)
+                :mul _, :real' lhs, :real' rhs -> :some :real' (lhs * rhs)
 
-                :div _, :real' lhs, :real' rhs -> :real' (lhs / rhs)
+                :div _, :real' lhs, :real' rhs -> :some :real' (lhs / rhs)
 
-                _ -> panic ""
+                :str-prepend, :str' lhs, :str' rhs ->
+                  :some :str' string.prepend lhs rhs
 
-              :lit lit
+                _ -> :none
 
-            _, _ -> :prim :binary (op, lhs, rhs)
+              let expr = match lit
+                :some lit -> :lit lit
+                :none -> :prim :binary (op, :lit lhs, :lit rhs)
+
+              state, expr
+
+            _, _ -> state, :prim :binary (op, lhs, rhs)
+
+local should-inline state env var expr =
+  let inline-limit = 1
+  let size-limit = 50
+
+  let inline = get-inline var state
+  let size = size expr
+
+  inline < inline-limit and size < size-limit
+
+is expr -> nat
+local size expr =
+  match expr
+    :var _ -> 1
+    :lit _ -> 1
+    :lam (_, out) -> size out + 1
+    :app (lam, in) -> size lam + size in + 1
+    :field (expr, _) -> size expr + 1
+    :bind (in, _, out) -> size in + size out + 1
+
+    :case (scrutinee, arms) ->
+      let arms = arms
+        |> map \_, expr. size expr
+        |> fold 0 \x y. x + y
+
+      size scrutinee + arms + 1
+
+    :cons cons ->
+      match cons
+        :empty -> 1
+
+        :cons (head, tail) -> size head + size tail + 1
+
+        :variant (_, payload) ->
+          let payload = payload
+            |> map-some size
+            |> some-or 0
+
+          payload + 1
+
+        :record (from, fields) ->
+          let from = from
+            |> map-some size
+            |> some-or 0
+
+          let fields = fields
+            |> map \_, expr. size expr
+            |> fold 0 \x y. x + y
+
+          from + fields + 1
+
+        :tuple fields ->
+          let fields = fields
+            |> map size
+            |> fold 0 \x y. x + y
+
+          fields + 1
+
+    :prim prim ->
+      match prim
+        :extern' _ -> 1
+        :unary (_, expr) -> size expr + 1
+        :binary (_, lhs, rhs) -> size lhs + size rhs + 1
+
+is expr -> nat
+local cost expr =
+  match expr
+    :var _ -> 0
+    :lit _ -> 0
+    :lam _ -> 1
+    :app (lam, in) -> cost lam + cost in + 1
+    :bind (in, _, out) -> cost in + cost out
+    _ -> 1
 
 is var -> expr -> nat
 local uses var expr =

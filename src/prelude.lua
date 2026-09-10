@@ -109,8 +109,12 @@ local function bind(x, y)
   return y(x())
 end
 
+local function numcast(x)
+  return x
+end
+
 local function panic(message)
-  print("explicit panic: " .. message)
+  print("explicit panic: " .. message .. "\n")
   os.exit(1)
 end
 
