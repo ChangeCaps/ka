@@ -3,39 +3,20 @@ import "std:string" as string
 import "std:list" as list
 
 type expr =
+  | :atom atom
+  | :lam (var, expr)
+  | :app (expr, atom)
+  | :cons (cons, [expr])
+  | :case (expr, case)
+
+type atom =
   | :var var
   | :lit lit
-  | :lam (var, expr)
-  | :app (expr, expr)
-  | :rec ([expr, var], expr)
-  | :bind (expr, var, expr)
-  | :field (expr, field)
-  | :case (expr, [alt, expr])
-  | :cons cons
-  | :prim prim
-
-type alt =
-  | :empty
-  | :cons (var, var)
-  | :str' str
-  | :variant (str, option var)
-  | :default
 
 type var = {
   id:   nat
   name: str
 }
-
-type cons =
-  | :empty
-  | :cons (expr, expr)
-  | :variant (str, option expr)
-  | :record (option expr, [str, expr])
-  | :tuple [expr]
-
-type field =
-  | :name str
-  | :index nat
 
 type lit =
   | :str' str
@@ -43,246 +24,11 @@ type lit =
   | :int' int
   | :real' real
 
-type prim =
-  | :extern' extern'
-  | :unary (unary, expr)
-  | :binary (binary, expr, expr)
-
-type extern' = {
-  id: str
+type cons = {
+  id:   nat
+  name: str
 }
 
-type unary =
-  | :dynamic
-  | :panic
-  | :num-to-str number
-  | :num-hash number
-  | :num-cast number
-  | :str-hash
-  | :str-length
-  | :io-pure
-
-type binary =
-  | :add number
-  | :sub number
-  | :mul number
-  | :div number
-  | :gt number
-  | :lt number
-  | :ge number
-  | :le number
-  | :land
-  | :lor
-  | :eq
-  | :ne
-  | :trace
-  | :nat-xor
-  | :str-prepend
-  | :str-split-at
-  | :str-find
-  | :io-bind
-
-type number =
-  | :nat'
-  | :int'
-  | :real'
-
-is expr -> str
-format expr = format-expr 0 0 expr
-
-is nat -> nat -> expr -> str
-local format-expr indent p expr =
-  let paren p' s = match p > p'
-    :true -> s |> string.prepend "(" |> string.append ")"
-    :false -> s
-
-  let line = string.repeat (indent + 1) "  "
-    |> string.prepend "\n"
-
-  match expr
-    :var var -> var.name
-
-    :lit lit ->
-      match lit
-        :str' s -> string.format s
-        :nat' x -> string.format x
-        :int' x -> string.format x
-        :real' x -> string.format x
-
-    :lam (var, expr) ->
-      format-expr (indent + 1) 0 expr
-        |> string.prepend line
-        |> string.prepend "."
-        |> string.prepend var.name
-        |> string.prepend "\\"
-        |> paren 0
-
-    :app (lam, expr) ->
-      format-expr indent 10 lam
-        |> string.append " "
-        |> string.append (format-expr indent 9 expr)
-        |> paren (0)
-
-    :rec (binds, output) ->
-      let binds = binds
-        |> map \expr, var.
-          format-expr (indent + 1) 1 expr
-            |> string.prepend " = "
-            |> string.prepend var.name
-        |> string.join line
-
-      "letrec"
-        |> string.append line
-        |> string.append binds
-        |> string.append "\n"
-        |> string.append (string.repeat indent "  ")
-        |> string.append "in "
-        |> string.append (format-expr (indent + 1) 1 output)
-
-    :bind (input, var, output) ->
-      format-expr indent 1 input
-        |> string.prepend " = "
-        |> string.prepend var.name
-        |> string.prepend "let "
-        |> string.append line
-        |> string.append (format-expr (indent + 1) 1 output)
-        |> paren 0
-
-    :field (expr, field) ->
-      let field = match field
-        :name s -> s
-        :index n -> string.format n
-
-      format-expr indent 10 expr
-        |> string.append "."
-        |> string.append field
-        |> paren 10
-
-    :case (scrutinee, alts) ->
-      let alts = alts
-        |> map \alt, expr.
-          let alt = match alt
-            :str' s -> string.format s
-
-            :variant (name, payload) ->
-              let payload = payload
-                |> map-some \var. var.name |> string.prepend " "
-                |> some-or ""
-
-              string.prepend ":" name
-                |> string.append payload
-
-            :cons (head, tail) ->
-              head.name
-                |> string.append " :: "
-                |> string.append tail.name
-
-            :empty -> "[]"
-
-            :default -> "default"
-
-          format-expr (indent + 1) 0 expr
-            |> string.prepend " -> "
-            |> string.prepend alt
-        |> string.join line
-
-      format-expr indent 1 scrutinee
-        |> string.prepend "case "
-        |> string.append line
-        |> string.append alts
-        |> paren 0
-
-    :cons cons ->
-      match cons
-        :empty -> "[]"
-
-        :cons (head, tail) ->
-          let head = format-expr indent 3 head
-          let tail = format-expr indent 2 tail
-
-          head
-            |> string.append " :: "
-            |> string.append tail
-            |> paren 2
-
-        :variant (name, payload) ->
-          let payload = payload
-            |> map-some \payload.
-              format-expr indent 4 payload
-                |> string.prepend " "
-            |> some-or ""
-
-          string.prepend ":" name
-            |> string.append payload
-            |> paren 3
-
-        :record (from, fields) ->
-          fields
-            |> map \name, expr.
-              format-expr indent 0 expr
-                |> string.prepend ": "
-                |> string.prepend name
-            |> string.join "; "
-            |> string.prepend "{"
-            |> string.append "}"
-
-        :tuple fields ->
-          fields
-            |> map (format-expr indent 2)
-            |> string.join ", "
-            |> paren 1
-
-    :prim prim ->
-      match prim
-        :extern' extern' ->
-          "(extern \""
-            |> string.append extern'.id
-            |> string.append "\")"
-
-        :unary (unary, expr) ->
-          let op = match unary
-            :dynamic -> "dynamic"
-            :panic -> "panic"
-            :num-to-str _ -> "num-to-str"
-            :num-hash _ -> "num-hash"
-            :num-cast _ -> "num-cast"
-            :str-hash -> "str-hash"
-            :str-length -> "str-length"
-            :io-pure -> "io-pure"
-
-          op
-            |> string.append " "
-            |> string.append (format-expr indent 0 expr)
-            |> string.prepend "("
-            |> string.append ")"
-
-        :binary (binary, lhs, rhs) ->
-          let op = match binary
-            :add _ -> "+"
-            :sub _ -> "-"
-            :mul _ -> "*"
-            :div _ -> "/"
-            :gt _ -> ">"
-            :lt _ -> "<"
-            :ge _ -> ">="
-            :le _ -> "<="
-            :land -> "and"
-            :lor -> "or"
-            :eq -> "=="
-            :ne -> "!="
-            :trace -> "trace"
-            :nat-xor -> "xor"
-            :str-prepend -> "str-prepend"
-            :str-split-at -> "str-split-at"
-            :str-find -> "str-find"
-            :io-bind -> "io-bind"
-
-          op
-            |> string.append " "
-            |> string.append (format-expr indent 0 lhs)
-            |> string.append " "
-            |> string.append (format-expr indent 0 rhs)
-            |> string.prepend "("
-            |> string.append ")"
-
-    _ -> string.format expr
+type case =
+  | :cons ([cons, [var], expr], option (var, expr))
+  | :lit ([lit, expr], option (var, expr))
